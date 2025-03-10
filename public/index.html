@@ -221,6 +221,7 @@
           </div>
           <div class="lobby-controls">
             <button id="start-game-btn" class="primary-btn">Start Game</button>
+            <button id="return-game-btn" class="primary-btn" style="display: none;">Return to Game</button>
             <button id="leave-lobby-btn" class="secondary-btn">
               Leave Lobby
             </button>
@@ -240,14 +241,6 @@
                 Team: <span id="team-value">-</span>
               </div>
             </div>
-            <div class="status-score">
-              <div id="runner-score" class="score-indicator">
-                Runners: <span id="runner-score-value">0</span>
-              </div>
-              <div id="hunter-score" class="score-indicator">
-                Hunters: <span id="hunter-score-value">0</span>
-              </div>
-            </div>
             <div class="status-time">
               <div id="time-remaining" class="time-indicator">
                 Time: <span id="time-value">--:--</span>
@@ -263,9 +256,6 @@
           <div id="hunter-controls" class="team-controls">
             <button id="center-map-btn" class="control-btn">
               <img src="assets/icons/location-ping.svg" alt="Center Map" />
-            </button>
-            <button id="catch-runner-btn" class="primary-btn">
-              Catch Runner
             </button>
           </div>
           <div id="runner-controls" class="team-controls">
@@ -302,9 +292,6 @@
             <div class="menu-section">
               <h4>Options</h4>
               <div class="menu-options">
-                <button id="toggle-sound-btn" class="menu-option-btn">
-                  Toggle Sound
-                </button>
                 <button id="leave-game-btn" class="menu-option-btn danger">
                   Leave Game
                 </button>

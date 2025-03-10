@@ -170,15 +170,6 @@ const UI = {
     }
   },
 
-  // Update score display in game
-  updateScoreDisplay: function (hunterScore, runnerScore) {
-    const hunterScoreElement = document.getElementById("hunter-score-value");
-    const runnerScoreElement = document.getElementById("runner-score-value");
-
-    if (hunterScoreElement) hunterScoreElement.textContent = hunterScore;
-    if (runnerScoreElement) runnerScoreElement.textContent = runnerScore;
-  },
-
   // Update player lists in game menu
   updateGamePlayerLists: function (players) {
     if (!players) return;

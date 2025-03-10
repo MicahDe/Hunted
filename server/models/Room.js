@@ -55,7 +55,7 @@ class Room {
         centralLat,
         centralLng,
         startTime,
-        "waiting",
+        "lobby",
       ]
     );
 
@@ -87,12 +87,12 @@ class Room {
   /**
    * Update room status
    * @param {string} roomId - Room ID
-   * @param {string} status - New status ('waiting', 'active', 'completed')
+   * @param {string} status - New status ('lobby', 'active', 'completed')
    * @returns {Promise<Object>} Updated room
    */
   static async updateStatus(roomId, status) {
     // Validate status
-    if (!["waiting", "active", "completed"].includes(status)) {
+    if (!["lobby", "active", "completed"].includes(status)) {
       throw new Error("Invalid status");
     }
 
@@ -230,6 +230,10 @@ class Room {
         }
       });
 
+      // Count number of players in each team
+      const runnersCount = players.filter(p => p.team === "runner").length;
+      const huntersCount = players.filter(p => p.team === "hunter").length;
+
       // Check if game time has expired
       const now = Date.now();
       const gameTimeExpired =
@@ -280,7 +284,12 @@ class Room {
           reachedBy: t.reached_by,
           pointsValue: t.points_value,
         })),
-        scores: teamScores,
+        scores: {
+          runners: teamScores.runners,
+          hunters: teamScores.hunters,
+          runnersCount: runnersCount,
+          huntersCount: huntersCount
+        },
         timeRemaining: gameTimeExpired
           ? 0
           : (room.start_time + room.game_duration * 60 * 1000 - now) / 1000,

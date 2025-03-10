@@ -83,6 +83,9 @@ function setupEventListeners() {
   document
     .getElementById("delete-lobby-btn")
     .addEventListener("click", deleteLobby);
+  document
+    .getElementById("return-game-btn")
+    .addEventListener("click", returnToGame);
 
   // Game controls
   document.getElementById("menu-btn").addEventListener("click", () => {
@@ -104,15 +107,9 @@ function setupEventListeners() {
     });
 
   document
-    .getElementById("catch-runner-btn")
-    .addEventListener("click", showCatchRunnerDialog);
-  document
     .getElementById("caught-btn")
     .addEventListener("click", reportSelfCaught);
 
-  document
-    .getElementById("toggle-sound-btn")
-    .addEventListener("click", toggleSound);
   document
     .getElementById("leave-game-btn")
     .addEventListener("click", leaveGame);
@@ -154,6 +151,7 @@ function setupSocketConnection() {
 
   socket.on("disconnect", () => {
     console.log("Disconnected from server");
+    UI.hideLoading();
     UI.showNotification(
       "Disconnected from server. Trying to reconnect...",
       "error"
@@ -162,6 +160,7 @@ function setupSocketConnection() {
 
   socket.on("connect_error", (error) => {
     console.error("Connection error:", error);
+    UI.hideLoading();
     UI.showNotification(
       "Connection error. Please check your internet connection.",
       "error"
@@ -170,6 +169,7 @@ function setupSocketConnection() {
 
   socket.on("error", (data) => {
     console.error("Socket error:", data);
+    UI.hideLoading();
     UI.showNotification(data.message || "An error occurred", "error");
   });
 
@@ -209,6 +209,13 @@ function checkExistingSession() {
           username: session.username,
           team: session.team,
         });
+        
+        // If the game was active before reload, request the game state
+        // The handleGameState function will redirect to the game screen if needed
+        if (session.gameStatus === "active") {
+          console.log("Game was active, requesting current state");
+          socket.emit("resync_game_state", { roomId: session.roomId });
+        }
       }
     } catch (error) {
       console.error("Error parsing saved session:", error);
@@ -259,13 +266,23 @@ function createRoom() {
   UI.showLoading("Creating room...");
 
   // Emit socket event to create room
-  socket.emit("join_room", {
+  socket.emit("create_room",{
     roomName,
     username,
     team,
     gameDuration,
     centralLat: location.lat,
     centralLng: location.lng,
+  });
+
+  socket.on("room_created", (data) => {
+    console.log("Room created:", data);
+
+    socket.emit("join_room", {
+      roomName: data.roomName,
+      username,
+      team,
+    });
   });
 }
 
@@ -318,6 +335,7 @@ function handleJoinSuccess(data) {
 
   // Show lobby screen
   UI.showScreen("lobby-screen");
+  currentScreen = "lobby-screen";
 
   // Update lobby UI with the provided game state
   if (data.gameState && data.gameState.centralLocation) {
@@ -345,55 +363,40 @@ function updateLobbyUI(state) {
   console.log("Updating lobby UI with state:", state);
 
   // Set room name
-  document.getElementById(
-    "lobby-room-name"
-  ).textContent = `Room: ${gameState.roomName}`;
-
-  // Set game duration
-  document.getElementById(
-    "game-duration-display"
-  ).textContent = `${state.gameDuration} min`;
-
-  // Set target count
-  document.getElementById("target-count-display").textContent = state.targets
-    ? state.targets.length
-    : "Loading...";
+  const roomNameElement = document.getElementById("lobby-room-name");
+  roomNameElement.textContent = `Room: ${state.roomName}`;
 
   // Update player lists
-  updatePlayerLists(state.players);
+  if (state.players) {
+    updatePlayerLists(state.players);
+  }
 
-  // Initialize lobby map if we have the central location
+  // Update game settings
+  const durationElement = document.getElementById("game-duration-display");
+  if (durationElement) {
+    durationElement.textContent = `${state.gameDuration} min`;
+  }
+
+  const targetCountElement = document.getElementById("target-count-display");
+  if (targetCountElement && state.targets) {
+    targetCountElement.textContent = `${state.targets.length}`;
+  }
+
+  // Update lobby map
   if (state.centralLocation) {
-    console.log(
-      "Initializing lobby map with:",
-      state.centralLocation.lat,
-      state.centralLocation.lng
-    );
-
-    // Store in gameState for future reference
-    gameState.centralLocation = state.centralLocation;
-
-    // Wait a small amount of time to ensure the map container is visible
-    setTimeout(() => {
-      GameMap.initLobbyMap(
-        state.centralLocation.lat,
-        state.centralLocation.lng
-      );
-    }, 300);
-  } else if (gameState.centralLocation) {
-    // Use stored central location as fallback
-    console.log(
-      "Using stored central location for lobby map:",
-      gameState.centralLocation
-    );
-    setTimeout(() => {
-      GameMap.initLobbyMap(
-        gameState.centralLocation.lat,
-        gameState.centralLocation.lng
-      );
-    }, 300);
+    GameMap.initLobbyMap(state.centralLocation.lat, state.centralLocation.lng);
+  }
+  
+  // Show/hide buttons based on game status
+  const startGameBtn = document.getElementById("start-game-btn");
+  const returnGameBtn = document.getElementById("return-game-btn");
+  
+  if (state.status === "active") {
+    startGameBtn.style.display = "none";
+    returnGameBtn.style.display = "block";
   } else {
-    console.warn("No central location available for lobby map");
+    startGameBtn.style.display = gameState.isRoomCreator ? "block" : "none";
+    returnGameBtn.style.display = "none";
   }
 }
 
@@ -439,19 +442,15 @@ function updatePlayerLists(players) {
 function handleGameState(state) {
   console.log("Received game state:", state);
 
+  // Update game status in our local state
+  gameState.gameStatus = state.status;
+  saveGameSession();
+
   // Update UI based on current screen
   if (currentScreen === "lobby-screen") {
     updateLobbyUI(state);
   } else if (currentScreen === "game-screen") {
     Game.updateGameState(state);
-  }
-
-  // Check if game has already started
-  if (state.status === "active" && currentScreen !== "game-screen") {
-    console.log(
-      "Game is active but we are not on game screen, transitioning to game UI"
-    );
-    startGameUI(state);
   }
 
   // Check if game is over
@@ -472,33 +471,9 @@ function handlePlayerJoined(data) {
   // Show notification
   UI.showNotification(`${data.username} joined as ${data.team}`, "info");
 
-  // Request updated game state
-  socket.emit("get_game_state", { roomId: gameState.roomId });
-
-  // If we're on the lobby screen, refresh the player lists immediately with this new player
-  if (currentScreen === "lobby-screen") {
-    // Create a temporary player entry until we get the full game state
-    const tempPlayer = {
-      username: data.username,
-      team: data.team,
-      status: "active",
-    };
-
-    // Add to the appropriate team list
-    const list =
-      data.team === "hunter"
-        ? document.getElementById("hunter-list")
-        : document.getElementById("runner-list");
-
-    if (list) {
-      const listItem = document.createElement("li");
-      listItem.className = "player-item";
-      listItem.innerHTML = `
-                <img src="assets/icons/${data.team}.svg" alt="${data.team}" class="player-avatar">
-                <span class="player-name">${data.username}</span>
-            `;
-      list.appendChild(listItem);
-    }
+  if (gameState.roomId) {
+    // Request updated game state
+    socket.emit("resync_game_state", { roomId: gameState.roomId });
   }
 }
 
@@ -510,22 +485,17 @@ function handlePlayerDisconnected(data) {
   UI.showNotification(`${data.username} disconnected`, "info");
 
   // Request updated game state
-  socket.emit("get_game_state", { roomId: gameState.roomId });
+  socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
 
 // Handle runner location update
 function handleRunnerLocation(data) {
-  console.log("Runner location update:", data);
+  console.log("Runner location:", data);
 
   // Only process if we're in game screen
   if (currentScreen === "game-screen") {
     // Update runner marker on map
     GameMap.updateRunnerLocation(data);
-
-    // Play sound effect
-    if (Game.isSoundEnabled()) {
-      Game.playSound("ping");
-    }
   }
 }
 
@@ -538,11 +508,6 @@ function handleTargetReached(data) {
 
   // Update game state
   Game.updateGameState(data.gameState);
-
-  // Play sound effect
-  if (Game.isSoundEnabled()) {
-    Game.playSound("target-found");
-  }
 }
 
 // Handle runner caught event
@@ -562,13 +527,8 @@ function handleRunnerCaught(data) {
     Game.updateTeamUI("hunter");
   }
 
-  // Play sound effect
-  if (Game.isSoundEnabled()) {
-    Game.playSound("caught");
-  }
-
   // Request updated game state
-  socket.emit("get_game_state", { roomId: gameState.roomId });
+  socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
 
 // Handle game over event
@@ -658,6 +618,15 @@ function startGameUI(state) {
 
   // Show game screen
   UI.showScreen("game-screen");
+  
+  // Update current screen variable
+  currentScreen = "game-screen";
+  
+  // Update game state with game status
+  gameState.gameStatus = state.status;
+  
+  // Save session to localStorage with updated status
+  saveGameSession();
 
   // Initialize the game
   if (!Game || !Game.init) {
@@ -712,85 +681,6 @@ function leaveLobby() {
   UI.showScreen("splash-screen");
 }
 
-// Show dialog to catch a runner
-function showCatchRunnerDialog() {
-  // Get active runners
-  const state = Game.getGameState();
-  if (!state || !state.players) return;
-
-  const runners = state.players.filter(
-    (p) => p.team === "runner" && p.status === "active"
-  );
-
-  if (runners.length === 0) {
-    return UI.showNotification("No active runners to catch", "info");
-  }
-
-  // Create a simple dialog
-  const dialogHTML = `
-        <div class="menu-section">
-            <h4>Select Runner to Catch</h4>
-            <div class="menu-options">
-                ${runners
-                  .map(
-                    (runner) => `
-                    <button class="menu-option-btn catch-runner-option" data-player-id="${runner.playerId}">
-                        ${runner.username}
-                    </button>
-                `
-                  )
-                  .join("")}
-                <button class="menu-option-btn" id="cancel-catch">Cancel</button>
-            </div>
-        </div>
-    `;
-
-  // Create overlay
-  const overlay = document.createElement("div");
-  overlay.className = "loading-overlay show";
-  overlay.innerHTML = `
-        <div class="game-menu" style="position: relative; right: 0; width: 80%; max-width: 300px; border-radius: var(--border-radius-lg);">
-            <div class="menu-header">
-                <h3>Catch Runner</h3>
-                <button class="close-btn" id="close-catch-dialog">×</button>
-            </div>
-            <div class="menu-content">
-                ${dialogHTML}
-            </div>
-        </div>
-    `;
-
-  document.body.appendChild(overlay);
-
-  // Add event listeners
-  document
-    .getElementById("close-catch-dialog")
-    .addEventListener("click", () => {
-      document.body.removeChild(overlay);
-    });
-
-  document.getElementById("cancel-catch").addEventListener("click", () => {
-    document.body.removeChild(overlay);
-  });
-
-  // Add event listeners to runner options
-  document.querySelectorAll(".catch-runner-option").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const playerId = e.currentTarget.dataset.playerId;
-      catchRunner(playerId);
-      document.body.removeChild(overlay);
-    });
-  });
-}
-
-// Catch a runner
-function catchRunner(playerId) {
-  // Emit event to server
-  socket.emit("player_caught", {
-    caughtPlayerId: playerId,
-  });
-}
-
 // Report self as caught
 function reportSelfCaught() {
   // Create confirm dialog
@@ -804,11 +694,6 @@ function reportSelfCaught() {
       caughtPlayerId: gameState.playerId,
     });
   }
-}
-
-// Toggle sound
-function toggleSound() {
-  Game.toggleSound();
 }
 
 // Leave the game
@@ -859,6 +744,9 @@ function returnToHome() {
 // Handle room deleted event
 function handleRoomDeleted(data) {
   console.log("Room deleted:", data);
+
+  // Hide loading indicator
+  UI.hideLoading();
 
   // Show notification
   UI.showNotification("The room has been deleted by the host", "warning");
@@ -915,6 +803,18 @@ window.Game = window.Game || {};
 window.Game.getGameState = function () {
   return gameState;
 };
+
+// Function to return to an active game from the lobby
+function returnToGame() {
+  // Show game screen
+  UI.showScreen("game-screen");
+  
+  // Update current screen variable
+  currentScreen = "game-screen";
+  
+  // Request the latest game state
+  socket.emit("resync_game_state", { roomId: gameState.roomId });
+}
 
 // Initialize app when DOM is loaded
 document.addEventListener("DOMContentLoaded", initApp);

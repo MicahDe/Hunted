@@ -68,7 +68,7 @@ router.post("/rooms", (req, res) => {
           centralLat,
           centralLng,
           startTime,
-          "active",
+          "lobby",
         ],
         function (err) {
           if (err) {

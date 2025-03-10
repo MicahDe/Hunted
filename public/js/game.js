@@ -15,7 +15,6 @@ const Game = {
   // Game settings
   settings: {
     locationUpdateInterval: 30000, // 30 seconds
-    soundEnabled: true,
   },
 
   // Timer intervals
@@ -24,22 +23,12 @@ const Game = {
     locationTimer: null,
   },
 
-  // Audio elements
-  audio: {
-    ping: null,
-    targetFound: null,
-    caught: null,
-  },
-
   // Initialize the game
   init: function (playerInfo, socket, initialState) {
     // Store references
     this.playerInfo = playerInfo;
     this.socket = socket;
     this.gameState = initialState;
-
-    // Initialize audio
-    this.initAudio();
 
     // Initialize map
     GameMap.initGameMap(
@@ -56,74 +45,6 @@ const Game = {
 
     // Update targets on map
     GameMap.updateTargets(initialState.targets, playerInfo.team);
-  },
-
-  // Initialize audio elements
-  initAudio: function () {
-    // Create audio elements
-    this.audio.ping = new Audio("assets/sounds/ping.mp3");
-    this.audio.ping.volume = 0.3;
-
-    this.audio.targetFound = new Audio("assets/sounds/target-found.mp3");
-    this.audio.targetFound.volume = 0.5;
-
-    this.audio.caught = new Audio("assets/sounds/caught.mp3");
-    this.audio.caught.volume = 0.7;
-
-    // Pre-load audio
-    this.audio.ping.load();
-    this.audio.targetFound.load();
-    this.audio.caught.load();
-  },
-
-  // Play a sound
-  playSound: function (sound) {
-    if (!this.settings.soundEnabled) return;
-
-    switch (sound) {
-      case "ping":
-        this.audio.ping.currentTime = 0;
-        this.audio.ping
-          .play()
-          .catch((e) => console.error("Error playing sound:", e));
-        break;
-      case "target-found":
-        this.audio.targetFound.currentTime = 0;
-        this.audio.targetFound
-          .play()
-          .catch((e) => console.error("Error playing sound:", e));
-        break;
-      case "caught":
-        this.audio.caught.currentTime = 0;
-        this.audio.caught
-          .play()
-          .catch((e) => console.error("Error playing sound:", e));
-        break;
-    }
-  },
-
-  // Toggle sound
-  toggleSound: function () {
-    this.settings.soundEnabled = !this.settings.soundEnabled;
-
-    // Show notification
-    UI.showNotification(
-      `Sound ${this.settings.soundEnabled ? "enabled" : "disabled"}`,
-      "info"
-    );
-
-    // Update button text
-    const toggleSoundBtn = document.getElementById("toggle-sound-btn");
-    if (toggleSoundBtn) {
-      toggleSoundBtn.textContent = this.settings.soundEnabled
-        ? "Disable Sound"
-        : "Enable Sound";
-    }
-  },
-
-  // Check if sound is enabled
-  isSoundEnabled: function () {
-    return this.settings.soundEnabled;
   },
 
   // Initialize game UI
@@ -213,9 +134,6 @@ const Game = {
   updateGameState: function (state) {
     // Store new state
     this.gameState = state;
-
-    // Update UI
-    UI.updateScoreDisplay(state.scores.hunters, state.scores.runners);
 
     // Update target display for runners
     if (this.playerInfo.team === "runner") {
@@ -347,20 +265,21 @@ const Game = {
     return this.gameState;
   },
 
-  // Clean up game resources
+  // Clean up game
   cleanup: function () {
     // Clear timers
     clearInterval(this.timers.gameTimer);
     clearInterval(this.timers.locationTimer);
-
+    
     // Stop location tracking
     GameMap.stopLocationTracking();
-
+ 
     // Clean up map
     GameMap.cleanup();
 
-    // Reset state
+    // Clear game state
     this.gameState = null;
+    this.socket = null;
     this.playerInfo = null;
   },
 };

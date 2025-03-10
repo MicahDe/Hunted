@@ -8,7 +8,36 @@ module.exports = function (io, db) {
   io.on("connection", (socket) => {
     console.log(`Socket connected: ${socket.id}`);
 
-    // Create or join a room
+    // Create a room
+    socket.on("create_room", async (data) => {
+      try {
+        const { roomName, username, team, gameDuration, centralLat, centralLng } = data;
+        let roomId;
+
+        // Create new room
+        roomId = uuidv4();
+        await createRoom(
+          roomId,
+          roomName,
+          data.gameDuration,
+          data.centralLat,
+          data.centralLng
+        );
+
+        return socket.emit("room_created", {
+          roomId,
+          roomName,
+          gameDuration,
+          centralLat,
+          centralLng,
+        });
+      } catch (error) {
+        console.error("Error creating room:", error);
+        socket.emit("error", { message: "Failed to create room" });
+      }
+    });
+
+    // Join a room
     socket.on("join_room", async (data) => {
       try {
         const { roomName, username, team } = data;
@@ -28,26 +57,14 @@ module.exports = function (io, db) {
             playerId = player.player_id;
 
             // Update player status
-            await updatePlayerStatus(playerId, "active");
+            await updatePlayerStatus(playerId, "lobby");
           } else {
             // New player joining existing room
             playerId = uuidv4();
             await createPlayer(playerId, roomId, username, team);
           }
         } else {
-          // Create new room
-          roomId = uuidv4();
-          await createRoom(
-            roomId,
-            roomName,
-            data.gameDuration,
-            data.centralLat,
-            data.centralLng
-          );
-
-          // Create first player
-          playerId = uuidv4();
-          await createPlayer(playerId, roomId, username, team);
+          return socket.emit("error", { message: "Room not found" });
         }
 
         // Join socket room
@@ -67,6 +84,9 @@ module.exports = function (io, db) {
           team,
           timestamp: Date.now(),
         });
+        
+        // Broadcast updated game state to all clients in the room
+        io.to(roomId).emit("game_state", gameState);
 
         // Return player and room info
         socket.emit("join_success", {
@@ -84,15 +104,24 @@ module.exports = function (io, db) {
     socket.on("delete_room", async (data) => {
       try {
         const { roomId } = data;
+        console.log(`Attempting to delete room with ID: ${roomId}`);
         const playerInfo = connectedPlayers.get(socket.id);
 
         if (!playerInfo) {
+          console.log(`Player not found for socket ID: ${socket.id}`);
           return socket.emit("error", { message: "Player not found" });
         }
 
         // Verify player is the room creator
-        const room = await getRoom(roomId);
+        const room = await new Promise((resolve, reject) => {
+          db.get("SELECT * FROM rooms WHERE room_id = ?", [roomId], (err, row) => {
+            if (err) reject(err);
+            resolve(row);
+          });
+        });
+
         if (!room) {
+          console.log(`Room not found with ID: ${roomId}`);
           return socket.emit("error", { message: "Room not found" });
         }
 
@@ -299,19 +328,36 @@ module.exports = function (io, db) {
 
       console.log(`Socket disconnected: ${socket.id}`);
     });
+
+    socket.on("resync_game_state", async (data) => {
+      try {
+        const { roomId } = data;
+        console.log(`Fetching game state for room: ${roomId}`);
+        
+        const gameState = await getGameState(roomId);
+        socket.emit("game_state", gameState);
+      } catch (error) {
+        console.error("Error getting game state:", error);
+        socket.emit("error", { message: "Failed to get game state" });
+      }
+    });
   });
 
   // Database helper functions
   async function deleteRoom(roomId) {
+    console.log(`Starting deleteRoom function for roomId: ${roomId}`);
     return new Promise((resolve, reject) => {
       // Delete players first due to foreign key constraints
+      console.log(`Deleting players for roomId: ${roomId}`);
       db.run("DELETE FROM players WHERE room_id = ?", [roomId], function (err) {
         if (err) {
           console.error("Error deleting players:", err);
           return reject(err);
         }
+        console.log(`Successfully deleted players for roomId: ${roomId}`);
 
         // Delete targets
+        console.log(`Deleting targets for roomId: ${roomId}`);
         db.run(
           "DELETE FROM targets WHERE room_id = ?",
           [roomId],
@@ -320,8 +366,10 @@ module.exports = function (io, db) {
               console.error("Error deleting targets:", err);
               return reject(err);
             }
+            console.log(`Successfully deleted targets for roomId: ${roomId}`);
 
             // Delete room
+            console.log(`Deleting room with roomId: ${roomId}`);
             db.run(
               "DELETE FROM rooms WHERE room_id = ?",
               [roomId],
@@ -330,7 +378,7 @@ module.exports = function (io, db) {
                   console.error("Error deleting room:", err);
                   return reject(err);
                 }
-
+                console.log(`Successfully deleted room with roomId: ${roomId}`);
                 resolve();
               }
             );
@@ -370,7 +418,7 @@ module.exports = function (io, db) {
           centralLat,
           centralLng,
           Date.now(),
-          "active",
+          "lobby",
         ],
         function (err) {
           if (err) reject(err);
