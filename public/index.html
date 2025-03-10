@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>HUNTED - GPS Pursuit Game</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="assets/icons/favicon.ico" />
+
+    <!-- External CSS -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+
+    <!-- Internal CSS -->
+    <link rel="stylesheet" href="css/variables.css" />
+    <link rel="stylesheet" href="css/main.css" />
+
+    <!-- Manifest for PWA -->
+    <link rel="manifest" href="manifest.json" />
+
+    <!-- iOS support -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="HUNTED" />
+    <link rel="apple-touch-icon" href="assets/icons/icon-192.png" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Splash Screen -->
+      <div id="splash-screen" class="screen active">
+        <div class="logo-container">
+          <h1 class="game-title">HUNTED</h1>
+          <h2 class="game-subtitle">GPS Pursuit Game</h2>
+        </div>
+        <div class="splash-buttons">
+          <button id="create-room-btn" class="primary-btn">Create Room</button>
+          <button id="join-room-btn" class="secondary-btn">Join Room</button>
+        </div>
+        <div class="app-version">v1.0.0</div>
+      </div>
+
+      <!-- Create Room Screen -->
+      <div id="create-room-screen" class="screen">
+        <div class="screen-header">
+          <button class="back-btn">&larr;</button>
+          <h2>Create Room</h2>
+        </div>
+        <div class="screen-content">
+          <form id="create-room-form">
+            <div class="form-group">
+              <label for="room-name">Room Name</label>
+              <input
+                type="text"
+                id="room-name"
+                placeholder="Enter room name"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="username">Your Username</label>
+              <input
+                type="text"
+                id="creator-username"
+                placeholder="Enter your username"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="game-duration">Game Duration (minutes)</label>
+              <input
+                type="number"
+                id="game-duration"
+                min="10"
+                max="180"
+                value="60"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label>Starting Team</label>
+              <div class="team-selector">
+                <button
+                  type="button"
+                  class="team-btn hunter-team selected"
+                  data-team="hunter"
+                >
+                  <img src="assets/icons/hunter.svg" alt="Hunter" />
+                  <span>Hunter</span>
+                </button>
+                <button
+                  type="button"
+                  class="team-btn runner-team"
+                  data-team="runner"
+                >
+                  <img src="assets/icons/runner.svg" alt="Runner" />
+                  <span>Runner</span>
+                </button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Starting Location</label>
+              <div id="setup-map" class="setup-map"></div>
+              <div class="location-info">
+                <span>Tap map to set starting point</span>
+                <div id="selected-location"></div>
+              </div>
+            </div>
+            <button type="submit" class="primary-btn">Create Room</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Join Room Screen -->
+      <div id="join-room-screen" class="screen">
+        <div class="screen-header">
+          <button class="back-btn">&larr;</button>
+          <h2>Join Room</h2>
+        </div>
+        <div class="screen-content">
+          <form id="join-room-form">
+            <div class="form-group">
+              <label for="join-room-name">Room Name</label>
+              <input
+                type="text"
+                id="join-room-name"
+                placeholder="Enter room name"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="join-username">Your Username</label>
+              <input
+                type="text"
+                id="join-username"
+                placeholder="Enter your username"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label>Select Team</label>
+              <div class="team-selector">
+                <button
+                  type="button"
+                  class="team-btn hunter-team selected"
+                  data-team="hunter"
+                >
+                  <img src="assets/icons/hunter.svg" alt="Hunter" />
+                  <span>Hunter</span>
+                </button>
+                <button
+                  type="button"
+                  class="team-btn runner-team"
+                  data-team="runner"
+                >
+                  <img src="assets/icons/runner.svg" alt="Runner" />
+                  <span>Runner</span>
+                </button>
+              </div>
+            </div>
+            <button type="submit" class="primary-btn">Join Room</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Lobby Screen -->
+      <div id="lobby-screen" class="screen">
+        <div class="screen-header">
+          <h2>Game Lobby</h2>
+          <div class="room-info">
+            <span id="lobby-room-name">Room: Loading...</span>
+          </div>
+        </div>
+        <div class="screen-content">
+          <div class="lobby-section">
+            <h3>Players</h3>
+            <div class="team-columns">
+              <div class="team-column">
+                <h4 class="hunter-title">Hunters</h4>
+                <ul id="hunter-list" class="player-list"></ul>
+              </div>
+              <div class="team-column">
+                <h4 class="runner-title">Runners</h4>
+                <ul id="runner-list" class="player-list"></ul>
+              </div>
+            </div>
+          </div>
+          <div class="lobby-section">
+            <h3>Game Settings</h3>
+            <div class="game-settings">
+              <div class="setting-item">
+                <span class="setting-label">Duration:</span>
+                <span id="game-duration-display">60 min</span>
+              </div>
+              <div class="setting-item">
+                <span class="setting-label">Play Area:</span>
+                <span>5km radius</span>
+              </div>
+              <div class="setting-item">
+                <span class="setting-label">Targets:</span>
+                <span id="target-count-display">Loading...</span>
+              </div>
+            </div>
+          </div>
+          <div class="lobby-section">
+            <h3>Game Location</h3>
+            <div id="lobby-map" class="lobby-map"></div>
+            <div class="location-info">
+              <span>All players must be within the circle to play</span>
+            </div>
+          </div>
+          <div class="lobby-controls">
+            <button id="start-game-btn" class="primary-btn">Start Game</button>
+            <button id="leave-lobby-btn" class="secondary-btn">
+              Leave Lobby
+            </button>
+            <button id="delete-lobby-btn" class="danger-btn">
+              Delete Lobby
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Game Screen -->
+      <div id="game-screen" class="screen">
+        <div class="game-header">
+          <div class="game-status">
+            <div class="status-team">
+              <div id="player-team" class="team-indicator">
+                Team: <span id="team-value">-</span>
+              </div>
+            </div>
+            <div class="status-score">
+              <div id="runner-score" class="score-indicator">
+                Runners: <span id="runner-score-value">0</span>
+              </div>
+              <div id="hunter-score" class="score-indicator">
+                Hunters: <span id="hunter-score-value">0</span>
+              </div>
+            </div>
+            <div class="status-time">
+              <div id="time-remaining" class="time-indicator">
+                Time: <span id="time-value">--:--</span>
+              </div>
+            </div>
+          </div>
+          <button id="menu-btn" class="menu-btn">≡</button>
+        </div>
+
+        <div id="game-map" class="game-map"></div>
+
+        <div class="game-controls">
+          <div id="hunter-controls" class="team-controls">
+            <button id="center-map-btn" class="control-btn">
+              <img src="assets/icons/location-ping.svg" alt="Center Map" />
+            </button>
+            <button id="catch-runner-btn" class="primary-btn">
+              Catch Runner
+            </button>
+          </div>
+          <div id="runner-controls" class="team-controls">
+            <button id="center-map-runner-btn" class="control-btn">
+              <img src="assets/icons/location-ping.svg" alt="Center Map" />
+            </button>
+            <div id="target-info" class="target-info">
+              Target: <span id="target-distance">Searching...</span>
+            </div>
+            <button id="caught-btn" class="danger-btn">I've Been Caught</button>
+          </div>
+        </div>
+
+        <!-- Game Menu (initially hidden) -->
+        <div id="game-menu" class="game-menu">
+          <div class="menu-header">
+            <h3>Game Menu</h3>
+            <button id="close-menu-btn" class="close-btn">×</button>
+          </div>
+          <div class="menu-content">
+            <div class="menu-section">
+              <h4>Players</h4>
+              <div class="team-columns">
+                <div class="team-column">
+                  <h5 class="hunter-title">Hunters</h5>
+                  <ul id="game-hunter-list" class="player-list"></ul>
+                </div>
+                <div class="team-column">
+                  <h5 class="runner-title">Runners</h5>
+                  <ul id="game-runner-list" class="player-list"></ul>
+                </div>
+              </div>
+            </div>
+            <div class="menu-section">
+              <h4>Options</h4>
+              <div class="menu-options">
+                <button id="toggle-sound-btn" class="menu-option-btn">
+                  Toggle Sound
+                </button>
+                <button id="leave-game-btn" class="menu-option-btn danger">
+                  Leave Game
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Game Over Screen -->
+      <div id="game-over-screen" class="screen">
+        <div class="screen-header">
+          <h2>Game Over</h2>
+        </div>
+        <div class="screen-content">
+          <div class="results-container">
+            <h3 id="winner-display">Winners: Hunters!</h3>
+            <div class="final-scores">
+              <div class="final-score hunter-score">
+                <h4>Hunters</h4>
+                <div class="score-value" id="final-hunter-score">0</div>
+              </div>
+              <div class="final-score runner-score">
+                <h4>Runners</h4>
+                <div class="score-value" id="final-runner-score">0</div>
+              </div>
+            </div>
+          </div>
+          <div class="game-stats">
+            <h3>Game Stats</h3>
+            <div class="stats-grid">
+              <div class="stat-item">
+                <span class="stat-label">Duration:</span>
+                <span id="final-duration">60 min</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Targets Reached:</span>
+                <span id="targets-reached">0</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Runners Caught:</span>
+                <span id="runners-caught">0</span>
+              </div>
+            </div>
+          </div>
+          <div class="game-over-controls">
+            <button id="new-game-btn" class="primary-btn">New Game</button>
+            <button id="return-home-btn" class="secondary-btn">
+              Return to Home
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Notifications -->
+      <div id="notification-container" class="notification-container"></div>
+
+      <!-- Loading Overlay -->
+      <div id="loading-overlay" class="loading-overlay">
+        <div class="loader"></div>
+        <div id="loading-message">Loading...</div>
+      </div>
+    </div>
+
+    <!-- External Scripts -->
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="/socket.io/socket.io.js"></script>
+
+    <!-- Internal Scripts -->
+    <script src="js/ui.js"></script>
+    <script src="js/map.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>
