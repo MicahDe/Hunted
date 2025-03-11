@@ -947,7 +947,7 @@ module.exports = function (io, db) {
           console.log(`Player ${playerId} awarded ${earnedPoints} points for discovering ${target.radius_level}m radius level`);
           
           // Calculate new points for next radius level
-          const newPointsValue = Math.floor(target.points_value * config.game.targetPointsMultiplier);
+          const newPointsValue = target.points_value + config.game.additionalPointsPerCircle;
           
           // Get the player to find their team
           const player = await getPlayerById(playerId);

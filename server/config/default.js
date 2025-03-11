@@ -30,16 +30,16 @@ module.exports = {
     targetRadiusLevels: [3200, 1600, 800, 400, 200],
 
     // Base points per target
-    baseTargetPoints: 10,
+    baseTargetPoints: 2,
 
-    // Additional points per inner circle
-    targetPointsMultiplier: 1.5,
+    // Additional points per each inner circle
+    additionalPointsPerCircle: 1,
 
     // Location update interval in milliseconds
     locationUpdateInterval: 30000,
 
     // Location update throttle in milliseconds (prevent abuse)
-    locationUpdateThrottle: 5000,
+    locationUpdateThrottle: 10000,
   },
 
   // Security config
