@@ -160,6 +160,45 @@ function calculateBearing(lat1, lng1, lat2, lng2) {
   return bearing;
 }
 
+/**
+ * Calculate destination point given starting point, bearing and distance
+ * @param {number} lat - Starting latitude in degrees
+ * @param {number} lng - Starting longitude in degrees
+ * @param {number} bearing - Bearing in degrees (0-360)
+ * @param {number} distance - Distance in meters
+ * @returns {Object} Object with lat and lng properties of destination point
+ */
+function calculateDestination(lat, lng, bearing, distance) {
+  // Convert to radians
+  const rlat = (lat * Math.PI) / 180;
+  const rlng = (lng * Math.PI) / 180;
+  const rbearing = (bearing * Math.PI) / 180;
+  
+  // Angular distance
+  const angularDistance = distance / EARTH_RADIUS;
+  
+  // Calculate destination latitude
+  const rlat2 = Math.asin(
+    Math.sin(rlat) * Math.cos(angularDistance) +
+    Math.cos(rlat) * Math.sin(angularDistance) * Math.cos(rbearing)
+  );
+  
+  // Calculate destination longitude
+  const rlng2 = rlng + Math.atan2(
+    Math.sin(rbearing) * Math.sin(angularDistance) * Math.cos(rlat),
+    Math.cos(angularDistance) - Math.sin(rlat) * Math.sin(rlat2)
+  );
+  
+  // Convert back to degrees
+  const lat2 = (rlat2 * 180) / Math.PI;
+  const lng2 = (rlng2 * 180) / Math.PI;
+  
+  return {
+    lat: lat2,
+    lng: lng2,
+  };
+}
+
 module.exports = {
   calculateDistance,
   generateRandomPoint,
@@ -167,4 +206,5 @@ module.exports = {
   generateTargets,
   isPointInCircle,
   calculateBearing,
+  calculateDestination,
 };

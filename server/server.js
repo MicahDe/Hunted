@@ -62,16 +62,19 @@ function initDatabase() {
 
     // Targets table
     db.run(`CREATE TABLE IF NOT EXISTS targets (
-            target_id TEXT PRIMARY KEY,
-            room_id TEXT,
-            lat REAL,
-            lng REAL,
-            radius_level INTEGER,
-            reached_by TEXT,
-            points_value INTEGER,
-            FOREIGN KEY (room_id) REFERENCES rooms (room_id),
-            FOREIGN KEY (reached_by) REFERENCES players (player_id)
-        )`);
+      target_id TEXT PRIMARY KEY,
+      room_id TEXT NOT NULL,
+      player_id TEXT NOT NULL,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      radius_level INTEGER NOT NULL,
+      points_value INTEGER NOT NULL,
+      status TEXT DEFAULT 'active',
+      created_at INTEGER DEFAULT (strftime('%s','now') * 1000),
+      reached_at INTEGER,
+      FOREIGN KEY(room_id) REFERENCES rooms(room_id) ON DELETE CASCADE,
+      FOREIGN KEY(player_id) REFERENCES players(player_id)
+    )`);
   });
 }
 

@@ -206,7 +206,7 @@ const GameMap = {
   },
 
   // Initialize the game map
-  initGameMap: function (centerLat, centerLng, boundaries) {
+  initGameMap: function (centerLat, centerLng, boundaries, playAreaRadius = 5000) {
     // Get map container
     const mapContainer = document.getElementById("game-map");
     if (!mapContainer) return;
@@ -245,11 +245,11 @@ const GameMap = {
     // Set default view based on provided center
     this.gameMap.setView([centerLat, centerLng], 14);
 
-    // Add game boundary circle (5km radius)
+    // Add game boundary circle
     this.boundaryCircle = L.circle([centerLat, centerLng], {
-      radius: 5000,
+      radius: playAreaRadius,
       color: "#2a3990",
-      fillColor: "#2a3990",
+      fillColor: "#ffffff",
       fillOpacity: 0.1,
       weight: 2,
       dashArray: "5, 10",
@@ -328,7 +328,7 @@ const GameMap = {
   },
 
   // Initialize the lobby map
-  initLobbyMap: function (centerLat, centerLng) {
+  initLobbyMap: function (centerLat, centerLng, playAreaRadius = 5000) {
     console.log(
       "Initializing lobby map with coordinates:",
       centerLat,
@@ -375,9 +375,9 @@ const GameMap = {
     // Add center marker
     L.marker([centerLat, centerLng]).addTo(this.lobbyMap);
 
-    // Add game boundary circle (5km radius)
+    // Add game boundary circle
     L.circle([centerLat, centerLng], {
-      radius: 5000,
+      radius: playAreaRadius,
       color: "#2a3990",
       fillColor: "#2a3990",
       fillOpacity: 0.1,
@@ -522,6 +522,10 @@ const GameMap = {
   // Update targets on map
   updateTargets: function (targets, playerTeam) {
     if (!this.gameMap) return;
+    if (playerTeam === "hunter") {
+      console.log("Skipping targets for hunter");
+      return;
+    }
     
     console.log("Updating targets for player team:", playerTeam);
     console.log("Available targets:", targets);
@@ -538,15 +542,10 @@ const GameMap = {
       console.log("Processing target:", target);
 
       // For runners, only show targets that are not reached
-      // For hunters, don't show targets at all
-      if (playerTeam === "hunter") {
-        console.log("Skipping target for hunter");
-        return;
-      }
       
-      // Skip targets that have been reached by other players
-      if (target.reachedBy && target.reachedBy !== gameState.playerId) {
-        console.log("Target already reached by another player");
+      // Skip targets that are owned by other players
+      if (target.playerId !== gameState.playerId) {
+        console.log("Target owned by another player");
         return;
       }
 
@@ -659,11 +658,6 @@ const GameMap = {
             }
           ).addTo(this.gameMap);
           console.log("Created new target circle with radius:", target.radiusLevel);
-          
-          // Add pulse animation for the innermost circle
-          if (target.radiusLevel === 200) {
-            this.targetCircles[target.targetId].getElement().classList.add('pulse-animation');
-          }
         }
       }
     });

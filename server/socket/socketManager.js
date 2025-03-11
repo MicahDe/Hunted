@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require("uuid");
 const geoUtils = require("../utils/geoUtils");
+const config = require("../config/default");
 
 module.exports = function (io, db) {
   // Track connected users
@@ -327,11 +328,6 @@ module.exports = function (io, db) {
               }
             }
           }
-        }
-
-        // Check if any hunters are nearby
-        if (team === "runner") {
-          checkHunterProximity(roomId, playerId, lat, lng);
         }
       } catch (error) {
         console.error("Error handling location update:", error);
@@ -1027,8 +1023,8 @@ module.exports = function (io, db) {
         room.central_lng
       );
       
-      // Calculate a random distance (500m to 1500m) from player toward center
-      const distance = Math.random() * 1000 + 500;
+      // Calculate a random distance (1000m to 1500m) from player toward center
+      const distance = Math.random() * 500 + 1000;
       const targetPos = geoUtils.calculateDestination(
         playerLat, 
         playerLng, 

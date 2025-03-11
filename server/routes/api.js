@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const geoUtils = require("../utils/geoUtils");
+const config = require("../config/default");
 
 // Get database from server.js
 const db = require("../server").db;
@@ -77,7 +78,7 @@ router.post("/rooms", (req, res) => {
 
           // Generate initial targets for the room (5-10 targets)
           const targetCount = Math.floor(Math.random() * 6) + 5;
-          const playAreaRadius = 5000; // 5km
+          const playAreaRadius = config.game.defaultPlayAreaRadius; // Use config value instead of hardcoding
 
           const targets = geoUtils.generateTargets(
             centralLat,
@@ -86,39 +87,13 @@ router.post("/rooms", (req, res) => {
             targetCount
           );
 
-          // Create targets in database
-          const targetInsertPromises = targets.map((target) => {
-            return new Promise((resolve, reject) => {
-              const targetId = uuidv4();
-              db.run(
-                "INSERT INTO targets (target_id, room_id, lat, lng, radius_level, points_value) VALUES (?, ?, ?, ?, ?, ?)",
-                [targetId, roomId, target.lat, target.lng, 2000, 10], // Initial radius 2km
-                function (err) {
-                  if (err) reject(err);
-                  resolve();
-                }
-              );
-            });
+          // No need to create targets here - we'll generate them on-demand for each player
+          // Just return success to the client
+          return res.status(201).json({
+            message: "Room created successfully",
+            roomId,
+            roomName,
           });
-
-          Promise.all(targetInsertPromises)
-            .then(() => {
-              res.status(201).json({
-                roomId,
-                roomName,
-                gameDuration,
-                centralLocation: {
-                  lat: centralLat,
-                  lng: centralLng,
-                },
-                startTime,
-                targetCount,
-              });
-            })
-            .catch((err) => {
-              console.error("Error creating targets:", err);
-              res.status(500).json({ error: "Failed to create targets" });
-            });
         }
       );
     }

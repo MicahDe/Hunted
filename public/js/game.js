@@ -27,13 +27,6 @@ const Game = {
   init: function (playerInfo, socket, initialState) {
     console.log("Initializing game with state:", initialState);
     console.log("Player is on team:", playerInfo.team);
-    
-    // Check if targets are included in initialState
-    if (!initialState.targets || initialState.targets.length === 0) {
-      console.error("No targets in initial game state!");
-    } else {
-      console.log(`Found ${initialState.targets.length} targets in initial state`);
-    }
 
     // Store references
     this.playerInfo = playerInfo;

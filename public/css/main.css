@@ -830,19 +830,6 @@ select:focus {
 
 .map-circle-target {
   stroke-dasharray: 5, 5;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0% {
-    opacity: 0.7;
-  }
-  50% {
-    opacity: 0.3;
-  }
-  100% {
-    opacity: 0.7;
-  }
 }
 
 .map-player-popup {
@@ -855,26 +842,6 @@ select:focus {
 
 .map-player-popup-runner {
   color: var(--color-runner);
-}
-
-/* Pulse animation for innermost target circles */
-.pulse-animation {
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.6;
-    transform: scale(1.1);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
 }
 
 /* Target circles with different colors */
