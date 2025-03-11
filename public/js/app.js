@@ -458,9 +458,6 @@ function handleGameState(state) {
 
   if (state.status === "completed" && currentScreen !== "game-over-screen") {
     handleGameOver({
-      winner:
-        state.scores.runners > state.scores.hunters ? "runners" : "hunters",
-      reason: "Game completed",
       gameState: state,
     });
   }
@@ -547,17 +544,6 @@ function handleGameOver(data) {
 function updateGameOverUI(data) {
   const state = data.gameState;
 
-  const winnerDisplay = document.getElementById("winner-display");
-  winnerDisplay.textContent = `Winners: ${
-    data.winner === "runners" ? "Runners!" : "Hunters!"
-  }`;
-
-  // Set score displays
-  document.getElementById("final-hunter-score").textContent =
-    state.scores.hunters;
-  document.getElementById("final-runner-score").textContent =
-    state.scores.runners;
-
   // Set game stats
   document.getElementById(
     "final-duration"
@@ -573,38 +559,48 @@ function updateGameOverUI(data) {
   ).length;
   document.getElementById("runners-caught").textContent = runnersCaught;
   
-  // Populate runner scores
-  const runnerScoresList = document.getElementById("runner-scores-list");
-  if (runnerScoresList) {
-    runnerScoresList.innerHTML = "";
+  // Populate all player scores
+  const allPlayerScoresList = document.getElementById("all-player-scores-list");
+  if (allPlayerScoresList) {
+    allPlayerScoresList.innerHTML = "";
     
-    // Get only runner players and sort by score (highest first)
-    const runners = state.players
-      .filter(p => p.team === "runner")
-      .sort((a, b) => (b.score || 0) - (a.score || 0));
+    // Sort all players by score (highest first)
+    const allPlayers = [...state.players].sort((a, b) => (b.score || 0) - (a.score || 0));
     
-    if (runners.length === 0) {
-      // No runners in the game
-      const noRunners = document.createElement("div");
-      noRunners.textContent = "No runners in this game";
-      runnerScoresList.appendChild(noRunners);
+    if (allPlayers.length === 0) {
+      // No players in the game (shouldn't happen)
+      const noPlayers = document.createElement("div");
+      noPlayers.textContent = "No players in this game";
+      allPlayerScoresList.appendChild(noPlayers);
     } else {
-      // Add each runner's score
-      runners.forEach(runner => {
+      // Add each player's score
+      allPlayers.forEach(player => {
         const scoreItem = document.createElement("div");
-        scoreItem.className = "player-score-item";
+        scoreItem.className = `player-score-item ${player.team}`;
+        
+        // Left side: player name and team
+        const playerInfo = document.createElement("div");
+        playerInfo.className = "player-info";
         
         const playerName = document.createElement("span");
         playerName.className = "player-name";
-        playerName.textContent = runner.username;
+        playerName.textContent = player.username;
         
+        const playerTeam = document.createElement("span");
+        playerTeam.className = "player-team";
+        playerTeam.textContent = `(${player.team})`;
+        
+        playerInfo.appendChild(playerName);
+        playerInfo.appendChild(playerTeam);
+        
+        // Right side: player score
         const playerScore = document.createElement("span");
         playerScore.className = "player-score";
-        playerScore.textContent = runner.score || 0;
+        playerScore.textContent = player.score || 0;
         
-        scoreItem.appendChild(playerName);
+        scoreItem.appendChild(playerInfo);
         scoreItem.appendChild(playerScore);
-        runnerScoresList.appendChild(scoreItem);
+        allPlayerScoresList.appendChild(scoreItem);
       });
     }
   }

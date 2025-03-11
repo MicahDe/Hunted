@@ -376,7 +376,6 @@ module.exports = function (io, db) {
 
           // Notify all players
           io.to(roomId).emit("game_over", {
-            winner: "hunters",
             reason: "All runners caught",
             gameState,
           });

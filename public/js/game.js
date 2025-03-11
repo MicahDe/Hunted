@@ -257,23 +257,16 @@ const Game = {
     GameMap.stopLocationTracking();
 
     // Show appropriate game over message
-    let winnerMessage;
+    let gameOverMessage;
     if (reason === "time") {
-      // Time expired, check scores
-      if (this.gameState.scores.runners > this.gameState.scores.hunters) {
-        winnerMessage = "Game Over! Runners win by points.";
-      } else if (
-        this.gameState.scores.hunters > this.gameState.scores.runners
-      ) {
-        winnerMessage = "Game Over! Hunters win by points.";
-      } else {
-        winnerMessage = "Game Over! It's a tie.";
-      }
+      gameOverMessage = "Game Over! Time expired.";
     } else if (reason === "caught") {
-      winnerMessage = "Game Over! All Runners have been caught.";
+      gameOverMessage = "Game Over! All Runners have been caught.";
+    } else {
+      gameOverMessage = "Game Over!";
     }
 
-    UI.showNotification(winnerMessage, "info");
+    UI.showNotification(gameOverMessage, "info");
   },
 
   // Get current game state

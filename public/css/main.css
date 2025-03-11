@@ -657,9 +657,17 @@ select:focus {
   display: flex;
   justify-content: space-between;
   padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--border-radius-md);
+}
+
+.player-score-item.runner {
   background-color: var(--runner-color-bg);
   color: var(--color-runner);
-  border-radius: var(--border-radius-md);
+}
+
+.player-score-item.hunter {
+  background-color: var(--hunter-color-bg);
+  color: var(--color-hunter);
 }
 
 .player-score-item .player-name {
@@ -668,6 +676,12 @@ select:focus {
 
 .player-score-item .player-score {
   font-weight: var(--font-weight-bold);
+}
+
+.player-score-item .player-team {
+  font-size: var(--font-size-sm);
+  opacity: 0.8;
+  margin-left: var(--spacing-2);
 }
 
 .stats-grid {
