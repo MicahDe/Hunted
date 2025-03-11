@@ -569,9 +569,45 @@ function updateGameOverUI(data) {
 
   // Count caught runners
   const runnersCaught = state.players.filter(
-    (p) => p.team === "hunter" && p.status === "caught"
+    (p) => p.team === "runner" && p.status === "caught"
   ).length;
   document.getElementById("runners-caught").textContent = runnersCaught;
+  
+  // Populate runner scores
+  const runnerScoresList = document.getElementById("runner-scores-list");
+  if (runnerScoresList) {
+    runnerScoresList.innerHTML = "";
+    
+    // Get only runner players and sort by score (highest first)
+    const runners = state.players
+      .filter(p => p.team === "runner")
+      .sort((a, b) => (b.score || 0) - (a.score || 0));
+    
+    if (runners.length === 0) {
+      // No runners in the game
+      const noRunners = document.createElement("div");
+      noRunners.textContent = "No runners in this game";
+      runnerScoresList.appendChild(noRunners);
+    } else {
+      // Add each runner's score
+      runners.forEach(runner => {
+        const scoreItem = document.createElement("div");
+        scoreItem.className = "player-score-item";
+        
+        const playerName = document.createElement("span");
+        playerName.className = "player-name";
+        playerName.textContent = runner.username;
+        
+        const playerScore = document.createElement("span");
+        playerScore.className = "player-score";
+        playerScore.textContent = runner.score || 0;
+        
+        scoreItem.appendChild(playerName);
+        scoreItem.appendChild(playerScore);
+        runnerScoresList.appendChild(scoreItem);
+      });
+    }
+  }
 }
 
 function startGame() {

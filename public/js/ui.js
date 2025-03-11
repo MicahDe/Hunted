@@ -170,6 +170,24 @@ const UI = {
     }
   },
 
+  // Update player score display
+  updatePlayerScore: function (score) {
+    const scoreElement = document.getElementById("score-value");
+    const scoreContainer = document.getElementById("player-score-container");
+    
+    if (!scoreElement || !scoreContainer) return;
+    
+    // Update score value
+    scoreElement.textContent = score || 0;
+    
+    // Show/hide score based on if player is a runner
+    if (gameState.team === "runner") {
+      scoreContainer.style.display = "block";
+    } else {
+      scoreContainer.style.display = "none";
+    }
+  },
+
   // Update player lists in game menu
   updateGamePlayerLists: function (players) {
     if (!players) return;
@@ -213,7 +231,7 @@ const UI = {
                 ${
                   runner.status === "caught"
                     ? '<span class="player-status caught">Caught</span>'
-                    : ""
+                    : `<span class="player-status score">Score: ${runner.score || 0}</span>`
                 }
             `;
       runnerList.appendChild(listItem);

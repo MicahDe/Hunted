@@ -638,8 +638,36 @@ select:focus {
   background-color: var(--color-surface);
   border-radius: var(--border-radius-lg);
   padding: var(--spacing-4);
-  margin-bottom: var(--spacing-5);
+  margin-bottom: var(--spacing-6);
   box-shadow: var(--shadow-sm);
+}
+
+.player-scores {
+  margin-bottom: var(--spacing-6);
+}
+
+.player-scores-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-3);
+}
+
+.player-score-item {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--spacing-2) var(--spacing-3);
+  background-color: var(--runner-color-bg);
+  color: var(--color-runner);
+  border-radius: var(--border-radius-md);
+}
+
+.player-score-item .player-name {
+  font-weight: var(--font-weight-medium);
+}
+
+.player-score-item .player-score {
+  font-weight: var(--font-weight-bold);
 }
 
 .stats-grid {
@@ -864,4 +892,35 @@ select:focus {
 .map-circle-target-level-125 {
   opacity: 0.9;
   z-index: 1000; /* Make sure innermost circles appear on top */
+}
+
+.time-indicator {
+  display: flex;
+  align-items: center;
+  font-weight: var(--font-weight-medium);
+}
+
+.score-indicator {
+  display: flex;
+  align-items: center;
+  font-weight: var(--font-weight-medium);
+  margin-left: var(--spacing-3);
+}
+
+#score-value {
+  color: var(--color-success);
+  margin-left: var(--spacing-1);
+}
+
+.time-warning {
+  color: var(--color-error);
+}
+
+.player-status.caught {
+  color: var(--color-error);
+}
+
+.player-status.score {
+  color: var(--color-success);
+  font-size: var(--font-size-sm);
 }

@@ -753,7 +753,13 @@ module.exports = function (io, db) {
       );
     });
 
-    // Calculate team scores
+    // Initialize player scores and team scores
+    const playerScores = {};
+    players.forEach(player => {
+      playerScores[player.player_id] = 0;
+    });
+    
+    // Calculate team scores (still maintain team scores for compatibility)
     const teamScores = {
       runners: 0,
       hunters: 0,
@@ -761,7 +767,12 @@ module.exports = function (io, db) {
 
     // Add points from completed targets
     completedTargets.forEach((target) => {
-      // Find player who reached target
+      // Add points to the individual player who reached the target
+      if (target.player_id && playerScores.hasOwnProperty(target.player_id)) {
+        playerScores[target.player_id] += target.points_value;
+      }
+      
+      // Find player who reached target (for team scores)
       const player = players.find((p) => p.player_id === target.player_id);
       if (player && player.team === "runner") {
         teamScores.runners += target.points_value;
@@ -782,7 +793,12 @@ module.exports = function (io, db) {
     
     // Add points from target discoveries
     targetDiscoveries.forEach((discovery) => {
-      // Find player who discovered the target
+      // Add points to individual player who discovered the target
+      if (discovery.player_id && playerScores.hasOwnProperty(discovery.player_id)) {
+        playerScores[discovery.player_id] += discovery.points_earned;
+      }
+      
+      // Find player who discovered the target (for team scores)
       const player = players.find((p) => p.player_id === discovery.player_id);
       if (player && player.team === "runner") {
         teamScores.runners += discovery.points_earned;
@@ -802,6 +818,11 @@ module.exports = function (io, db) {
       // Update room status
       await updateRoomStatus(roomId, "completed");
     }
+
+    // Add scores to players array for easy access
+    players.forEach(player => {
+      player.score = playerScores[player.player_id] || 0;
+    });
 
     // Prepare game state object
     return {
@@ -828,6 +849,7 @@ module.exports = function (io, db) {
               }
             : null,
         lastPing: p.last_ping_time,
+        score: p.score,
       })),
       targets: targets.map((t) => ({
         targetId: t.target_id,

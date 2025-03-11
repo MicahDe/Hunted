@@ -62,6 +62,18 @@ const Game = {
     // Update player lists in menu
     UI.updateGamePlayerLists(this.gameState.players);
 
+    // Initialize player score display
+    if (this.playerInfo.team === "runner") {
+      // Find current player in players list to get score
+      const playerInfo = this.gameState.players.find(
+        (p) => p.playerId === this.playerInfo.playerId
+      );
+      UI.updatePlayerScore(playerInfo ? playerInfo.score : 0);
+    } else {
+      // Hide score for hunters
+      UI.updatePlayerScore(0);
+    }
+
     // Set initial target distance for runners
     if (this.playerInfo.team === "runner") {
       this.updateTargetDistance();
@@ -136,6 +148,12 @@ const Game = {
     // Update target display for runners
     if (this.playerInfo.team === "runner") {
       this.updateTargetDistance();
+      
+      // Find current player in players list to get score
+      const playerInfo = state.players.find(
+        (p) => p.playerId === this.playerInfo.playerId
+      );
+      UI.updatePlayerScore(playerInfo ? playerInfo.score : 0);
     }
 
     // Update player lists in menu
@@ -148,7 +166,7 @@ const Game = {
     if (state.players) {
       // Find runners who have been caught
       const caughtRunners = state.players.filter(
-        (p) => p.team === "hunter" && p.status === "caught"
+        (p) => p.team === "runner" && p.status === "caught"
       );
 
       // Remove their markers from the map
