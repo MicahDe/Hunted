@@ -283,6 +283,7 @@ module.exports = function (io, db) {
                 location: targetResult.updatedTarget.location,
                 radiusLevel: targetResult.updatedTarget.radiusLevel,
                 pointsValue: targetResult.updatedTarget.pointsValue,
+                earnedPoints: targetResult.updatedTarget.earnedPoints,
                 gameState: await getGameState(roomId),
               });
             }
@@ -758,11 +759,33 @@ module.exports = function (io, db) {
       hunters: 0,
     };
 
+    // Add points from completed targets
     completedTargets.forEach((target) => {
       // Find player who reached target
       const player = players.find((p) => p.player_id === target.player_id);
       if (player && player.team === "runner") {
         teamScores.runners += target.points_value;
+      }
+    });
+    
+    // Get all target discoveries to add points from discovering target radius levels
+    const targetDiscoveries = await new Promise((resolve, reject) => {
+      db.all(
+        "SELECT * FROM target_discoveries WHERE player_id IN (SELECT player_id FROM players WHERE room_id = ?)",
+        [roomId],
+        (err, rows) => {
+          if (err) reject(err);
+          resolve(rows || []);
+        }
+      );
+    });
+    
+    // Add points from target discoveries
+    targetDiscoveries.forEach((discovery) => {
+      // Find player who discovered the target
+      const player = players.find((p) => p.player_id === discovery.player_id);
+      if (player && player.team === "runner") {
+        teamScores.runners += discovery.points_earned;
       }
     });
 
@@ -830,7 +853,7 @@ module.exports = function (io, db) {
     const targets = await new Promise((resolve, reject) => {
       db.all(
         "SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active'",
-        [roomId],
+        [roomId, playerId],
         (err, rows) => {
           if (err) reject(err);
           resolve(rows || []);
@@ -918,11 +941,50 @@ module.exports = function (io, db) {
           const newRadiusLevel = config.game.targetRadiusLevels[currentRadiusIndex + 1];
           console.log(`New radius level: ${newRadiusLevel}m (was ${target.radius_level}m)`);
           
+          // Award points to the player for discovering this radius level
+          // Points awarded equal to the current radius level
+          const earnedPoints = target.points_value;
+          console.log(`Player ${playerId} awarded ${earnedPoints} points for discovering ${target.radius_level}m radius level`);
+          
+          // Calculate new points for next radius level
+          const newPointsValue = Math.floor(target.points_value * config.game.targetPointsMultiplier);
+          
+          // Get the player to find their team
+          const player = await getPlayerById(playerId);
+          if (!player) {
+            console.error(`Player ${playerId} not found when awarding points`);
+            return null;
+          }
+          
+          // Only runners should get points
+          if (player.team === "runner") {
+            // Record that points were awarded for this target discovery
+            // Store in the database that this player discovered this target at this radius level
+            await new Promise((resolve, reject) => {
+              db.run(
+                `INSERT INTO target_discoveries 
+                (player_id, target_id, radius_level, points_earned, discovery_time)
+                VALUES (?, ?, ?, ?, ?)`,
+                [playerId, target.target_id, target.radius_level, earnedPoints, Date.now()],
+                function(err) {
+                  if (err) {
+                    console.error("Error recording target discovery:", err);
+                    reject(err);
+                  }
+                  resolve(this.lastID);
+                }
+              );
+            }).catch(err => {
+              console.error("Failed to record target discovery:", err);
+              // Continue even if recording fails - don't block the player
+            });
+          }
+          
           // Update target with smaller radius and more points
           await new Promise((resolve, reject) => {
             db.run(
-              "UPDATE targets SET radius_level = ?, points_value = points_value * ? WHERE target_id = ?",
-              [newRadiusLevel, config.game.targetPointsMultiplier, target.target_id],
+              "UPDATE targets SET radius_level = ?, points_value = ? WHERE target_id = ?",
+              [newRadiusLevel, newPointsValue, target.target_id],
               function (err) {
                 if (err) reject(err);
                 resolve(this.changes);
@@ -939,7 +1001,8 @@ module.exports = function (io, db) {
                 lng: target.lng,
               },
               radiusLevel: newRadiusLevel,
-              pointsValue: Math.floor(target.points_value * config.game.targetPointsMultiplier),
+              pointsValue: newPointsValue,
+              earnedPoints: earnedPoints,
             }
           };
         }

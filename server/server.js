@@ -62,20 +62,32 @@ function initDatabase() {
 
     // Targets table
     db.run(`CREATE TABLE IF NOT EXISTS targets (
-      target_id TEXT PRIMARY KEY,
-      room_id TEXT NOT NULL,
-      player_id TEXT NOT NULL,
-      lat REAL NOT NULL,
-      lng REAL NOT NULL,
-      radius_level INTEGER NOT NULL,
-      points_value INTEGER NOT NULL,
-      status TEXT DEFAULT 'active',
-      created_at INTEGER DEFAULT (strftime('%s','now') * 1000),
-      reached_at INTEGER,
-      FOREIGN KEY(room_id) REFERENCES rooms(room_id) ON DELETE CASCADE,
-      FOREIGN KEY(player_id) REFERENCES players(player_id)
-    )`);
-  });
+            target_id TEXT PRIMARY KEY,
+            room_id TEXT NOT NULL,
+            player_id TEXT NOT NULL,
+            lat REAL NOT NULL,
+            lng REAL NOT NULL,
+            radius_level INTEGER NOT NULL,
+            points_value INTEGER NOT NULL,
+            status TEXT DEFAULT 'active',
+            created_at INTEGER DEFAULT (strftime('%s','now') * 1000),
+            reached_at INTEGER,
+            FOREIGN KEY(room_id) REFERENCES rooms(room_id) ON DELETE CASCADE,
+            FOREIGN KEY(player_id) REFERENCES players(player_id)
+        )`);
+    
+    // Target discoveries table to track points earned
+    db.run(`CREATE TABLE IF NOT EXISTS target_discoveries (
+            discovery_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            radius_level INTEGER NOT NULL,
+            points_earned INTEGER NOT NULL,
+            discovery_time INTEGER NOT NULL,
+            FOREIGN KEY(player_id) REFERENCES players(player_id) ON DELETE CASCADE,
+            FOREIGN KEY(target_id) REFERENCES targets(target_id) ON DELETE CASCADE
+        )`);
+      });
 }
 
 // API Routes

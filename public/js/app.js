@@ -511,7 +511,15 @@ function handleNewTarget(data) {
 // Handle target radius update event
 function handleTargetRadiusUpdate(data) {
   console.log("Target radius updated:", data);
-  UI.showNotification("You're getting closer to the target!", "info");
+  
+  // Display the points earned notification if points were earned
+  if (data.pointsValue && data.earnedPoints) {
+    UI.showNotification(`You earned ${data.earnedPoints} points! Target is getting smaller!`, "success");
+  } else {
+    UI.showNotification("You're getting closer to the target!", "info");
+  }
+  
+  // Update game state
   Game.updateGameState(data.gameState);
 }
 
