@@ -117,15 +117,15 @@ const gameController = {
 
       // Verify runner exists and is on runner team
       if (!runner) {
-        return res.status(404).json({ error: "Player not found" });
+        return res.status(404).json({ error: "Player not found: " + playerId });
       }
 
       if (runner.team !== "runner") {
-        return res.status(400).json({ error: "Player is not a runner" });
+        return res.status(400).json({ error: "Player is not a runner: " + playerId });
       }
 
       if (runner.status === "caught") {
-        return res.status(400).json({ error: "Player already caught" });
+        return res.status(400).json({ error: "Player already caught: " + playerId });
       }
 
       // Catch the runner (updates status and team)
@@ -179,7 +179,7 @@ const gameController = {
       const player = await Player.updateLocation(playerId, lat, lng);
 
       if (!player) {
-        return res.status(404).json({ error: "Player not found" });
+        return res.status(404).json({ error: "Player not found: " + playerId });
       }
 
       // If player is runner, check if they reached any targets

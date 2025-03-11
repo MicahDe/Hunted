@@ -522,6 +522,9 @@ const GameMap = {
   // Update targets on map
   updateTargets: function (targets, playerTeam) {
     if (!this.gameMap) return;
+    
+    console.log("Updating targets for player team:", playerTeam);
+    console.log("Available targets:", targets);
 
     // Keep track of existing targets
     const existingTargetIds = Object.keys(this.targetMarkers);
@@ -531,13 +534,19 @@ const GameMap = {
     targets.forEach((target) => {
       // Add to updated list
       updatedTargetIds.push(target.targetId);
+      
+      console.log("Processing target:", target);
 
       // For runners, only show targets that are not reached
       // For hunters, don't show targets at all
-      if (
-        playerTeam === "hunter" ||
-        (target.reachedBy && target.reachedBy !== gameState.playerId)
-      ) {
+      if (playerTeam === "hunter") {
+        console.log("Skipping target for hunter");
+        return;
+      }
+      
+      // Skip targets that have been reached by other players
+      if (target.reachedBy && target.reachedBy !== gameState.playerId) {
+        console.log("Target already reached by another player");
         return;
       }
 
@@ -548,6 +557,7 @@ const GameMap = {
           target.location.lat,
           target.location.lng,
         ]);
+        console.log("Updated existing target marker");
       } else {
         // Only create marker for runner
         if (playerTeam === "runner") {
@@ -558,6 +568,7 @@ const GameMap = {
               icon: this.icons.target,
             }
           ).addTo(this.gameMap);
+          console.log("Created new target marker");
 
           // Add popup
           const popupContent = `
@@ -572,28 +583,87 @@ const GameMap = {
 
       // Check if target circle exists
       if (this.targetCircles[target.targetId]) {
-        // Update circle position and radius
+        // Update circle position 
         this.targetCircles[target.targetId].setLatLng([
           target.location.lat,
           target.location.lng,
         ]);
+        
+        // Update radius
         this.targetCircles[target.targetId].setRadius(target.radiusLevel);
+        console.log("Updated existing target circle with radius:", target.radiusLevel);
+        
+        // Update color based on radius level
+        let circleColor;
+        switch(target.radiusLevel) {
+          case 3200:
+            circleColor = '#ef7d54'; // Lightest orange - outer circle
+            break;
+          case 1600:
+            circleColor = '#e25b2c'; // Medium orange
+            break;
+          case 800:
+            circleColor = '#c73c0c'; // Dark orange
+            break;
+          case 400:
+            circleColor = '#a52808'; // Darker orange
+            break;
+          case 200:
+            circleColor = '#8b0c00'; // Darkest orange/red - innermost circle
+            break;
+          default:
+            circleColor = '#ef7d54';
+        }
+        
+        this.targetCircles[target.targetId].setStyle({
+          color: circleColor,
+          fillColor: circleColor
+        });
       } else {
         // Only create circle for runner
         if (playerTeam === "runner") {
-          // Create new circle
+          // Create new circle with color based on radius level
+          let circleColor;
+          switch(target.radiusLevel) {
+            case 3200:
+              circleColor = '#ef7d54'; // Lightest orange - outer circle
+              break;
+            case 1600:
+              circleColor = '#e25b2c'; // Medium orange
+              break;
+            case 800:
+              circleColor = '#c73c0c'; // Dark orange
+              break;
+            case 400:
+              circleColor = '#a52808'; // Darker orange
+              break;
+            case 200:
+              circleColor = '#8b0c00'; // Darkest orange/red - innermost circle
+              break;
+            default:
+              circleColor = '#ef7d54';
+              console.log("Using default color for unrecognized radius:", target.radiusLevel);
+          }
+          
+          // Create circle
           this.targetCircles[target.targetId] = L.circle(
             [target.location.lat, target.location.lng],
             {
               radius: target.radiusLevel,
-              color: "#ef7d54",
-              fillColor: "#ef7d54",
-              fillOpacity: 0.1,
+              color: circleColor,
+              fillColor: circleColor,
+              fillOpacity: 0.2,
               weight: 2,
               dashArray: "5, 5",
-              className: "map-circle-target",
+              className: `map-circle-target map-circle-target-level-${target.radiusLevel}`,
             }
           ).addTo(this.gameMap);
+          console.log("Created new target circle with radius:", target.radiusLevel);
+          
+          // Add pulse animation for the innermost circle
+          if (target.radiusLevel === 200) {
+            this.targetCircles[target.targetId].getElement().classList.add('pulse-animation');
+          }
         }
       }
     });
@@ -608,6 +678,7 @@ const GameMap = {
         }
 
         if (this.targetCircles[targetId]) {
+          // Remove the circle
           this.gameMap.removeLayer(this.targetCircles[targetId]);
           delete this.targetCircles[targetId];
         }

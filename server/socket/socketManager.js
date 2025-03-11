@@ -74,7 +74,7 @@ module.exports = function (io, db) {
         connectedPlayers.set(socket.id, { roomId, playerId, username, team });
 
         // Send initial game state
-        const gameState = await getGameState(roomId);
+        const gameState = await getGameState(roomId, playerId);
         socket.emit("game_state", gameState);
 
         // Notify room about new player
@@ -227,31 +227,115 @@ module.exports = function (io, db) {
             timestamp: Date.now(),
           };
 
-          hunters.forEach((hunter) => {
-            socket.to(hunter.player_id).emit("runner_location", locationData);
-          });
+          // Instead of trying to send to each hunter by player_id (which is not a socket ID),
+          // broadcast to the whole room. Clients will filter based on their team.
+          io.to(roomId).emit("runner_location", locationData);
 
-          // Check if runner reached any targets
-          const reachedTarget = await checkTargetDiscovery(
+          // Check for target discovery for runners
+          console.log(`Checking target discovery for runner ${playerId} at location ${lat}, ${lng}`);
+          
+          const targetResult = await checkTargetDiscovery(
             roomId,
             playerId,
             lat,
             lng
           );
 
-          if (reachedTarget) {
-            // Update game state and notify all players
-            const gameState = await getGameState(roomId);
-            io.to(roomId).emit("target_reached", {
-              playerId,
-              username,
-              target: reachedTarget,
-              gameState,
+          if (targetResult) {
+            console.log(`Target result for ${playerId}:`, targetResult);
+            
+            // Get player info
+            const playerData = await getPlayerById(playerId);
+            
+            // Handle different target results
+            
+            // Case 1: Player reached a target (smallest radius)
+            if (targetResult.reachedTarget) {
+              console.log(`Player ${playerId} reached target ${targetResult.reachedTarget.targetId}`);
+              
+              // Notify room of target reached
+              io.to(roomId).emit("target_reached", {
+                targetId: targetResult.reachedTarget.targetId,
+                location: targetResult.reachedTarget.location,
+                pointsValue: targetResult.reachedTarget.pointsValue,
+                playerId,
+                username: playerData.username,
+                gameState: await getGameState(roomId),
+              });
+              
+              // If a new target was also generated, notify just this player
+              if (targetResult.newTarget) {
+                console.log(`Sending new target ${targetResult.newTarget.targetId} to player ${playerId}`);
+                socket.emit("new_target", {
+                  target: targetResult.newTarget,
+                  gameState: await getGameState(roomId),
+                });
+              }
+            }
+            // Case 2: Player entered a larger radius, target updated with smaller radius
+            else if (targetResult.updatedTarget) {
+              console.log(`Player ${playerId} entered target radius, updating to smaller radius`);
+              
+              // Notify just this player about the radius update
+              socket.emit("target_radius_update", {
+                targetId: targetResult.updatedTarget.targetId,
+                location: targetResult.updatedTarget.location,
+                radiusLevel: targetResult.updatedTarget.radiusLevel,
+                pointsValue: targetResult.updatedTarget.pointsValue,
+                gameState: await getGameState(roomId),
+              });
+            }
+            // Case 3: New target was generated for player
+            else if (targetResult.isNew && targetResult.target) {
+              console.log(`New target ${targetResult.target.targetId} generated for player ${playerId}`);
+              
+              // Notify just this player about the new target
+              socket.emit("new_target", {
+                target: targetResult.target,
+                gameState: await getGameState(roomId),
+              });
+            }
+          }
+          
+          // If player has no active targets and is far from other targets,
+          // generate a new one
+          else if (targetResult === null) {
+            const activeTargets = await new Promise((resolve, reject) => {
+              db.all(
+                "SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active'",
+                [roomId, playerId],
+                (err, rows) => {
+                  if (err) reject(err);
+                  resolve(rows || []);
+                }
+              );
             });
+            
+            // If player has no active targets, generate one
+            if (activeTargets.length === 0) {
+              console.log(`Player ${playerId} has no active targets, generating one`);
+              const newTarget = await generateTargetForPlayer(roomId, playerId, lat, lng);
+              
+              if (newTarget) {
+                console.log(`New target ${newTarget.targetId} generated for player ${playerId}`);
+                
+                // Notify just this player about the new target
+                socket.emit("new_target", {
+                  target: newTarget,
+                  gameState: await getGameState(roomId),
+                });
+              }
+            }
           }
         }
+
+        // Check if any hunters are nearby
+        if (team === "runner") {
+          checkHunterProximity(roomId, playerId, lat, lng);
+        }
       } catch (error) {
-        console.error("Error updating location:", error);
+        console.error("Error handling location update:", error);
+        socket.emit("error", { message: "Error updating location" });
       }
     });
 
@@ -334,11 +418,84 @@ module.exports = function (io, db) {
         const { roomId } = data;
         console.log(`Fetching game state for room: ${roomId}`);
         
-        const gameState = await getGameState(roomId);
+        const playerInfo = connectedPlayers.get(socket.id);
+        if (!playerInfo) {
+          return socket.emit("error", { message: "Player not found" });
+        }
+        
+        // Get game state specific to this player
+        const gameState = await getGameState(roomId, playerInfo.playerId);
         socket.emit("game_state", gameState);
       } catch (error) {
         console.error("Error getting game state:", error);
         socket.emit("error", { message: "Failed to get game state" });
+      }
+    });
+
+    // Handle target request
+    socket.on("request_target", async (data) => {
+      try {
+        const playerInfo = connectedPlayers.get(socket.id);
+        if (!playerInfo) {
+          return socket.emit("error", { message: "Player not found" });
+        }
+
+        const { roomId, playerId, team } = playerInfo;
+        
+        // Only runners can request targets
+        if (team !== "runner") {
+          return socket.emit("error", { message: "Only runners can request targets" });
+        }
+        
+        console.log(`Player ${playerId} is requesting a target`);
+        
+        // Check if player already has active targets
+        const activeTargets = await new Promise((resolve, reject) => {
+          db.all(
+            "SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active'",
+            [roomId, playerId],
+            (err, rows) => {
+              if (err) reject(err);
+              resolve(rows || []);
+            }
+          );
+        });
+        
+        // If player already has a target, just return the current game state
+        if (activeTargets.length > 0) {
+          console.log(`Player ${playerId} already has ${activeTargets.length} active targets`);
+          const gameState = await getGameState(roomId, playerId);
+          return socket.emit("game_state", gameState);
+        }
+        
+        // Get player's location for target generation
+        const player = await getPlayerById(playerId);
+        if (!player.last_lat || !player.last_lng) {
+          return socket.emit("error", { message: "No location data available. Move around to get a target." });
+        }
+        
+        // Generate a new target for the player
+        const newTarget = await generateTargetForPlayer(
+          roomId, 
+          playerId, 
+          player.last_lat, 
+          player.last_lng
+        );
+        
+        if (newTarget) {
+          console.log(`Generated new target for player ${playerId}:`, newTarget);
+          
+          // Send the new target to the player
+          socket.emit("new_target", {
+            target: newTarget,
+            gameState: await getGameState(roomId, playerId),
+          });
+        } else {
+          socket.emit("error", { message: "Failed to generate target" });
+        }
+      } catch (error) {
+        console.error("Error handling target request:", error);
+        socket.emit("error", { message: "Error processing target request" });
       }
     });
   });
@@ -536,7 +693,7 @@ module.exports = function (io, db) {
     });
   }
 
-  async function getGameState(roomId) {
+  async function getGameState(roomId, requestingPlayerId = null) {
     // Get room info
     const room = await new Promise((resolve, reject) => {
       db.get("SELECT * FROM rooms WHERE room_id = ?", [roomId], (err, row) => {
@@ -559,10 +716,38 @@ module.exports = function (io, db) {
       );
     });
 
-    // Get all targets
-    const targets = await new Promise((resolve, reject) => {
+    // Get targets based on requesting player
+    let targets = [];
+    if (requestingPlayerId) {
+      // If specific player is requesting, get only their targets
+      targets = await new Promise((resolve, reject) => {
+        db.all(
+          "SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active'",
+          [roomId, requestingPlayerId],
+          (err, rows) => {
+            if (err) reject(err);
+            resolve(rows || []);
+          }
+        );
+      });
+    } else {
+      // For general game state, get all active targets
+      targets = await new Promise((resolve, reject) => {
+        db.all(
+          "SELECT * FROM targets WHERE room_id = ? AND status = 'active'",
+          [roomId],
+          (err, rows) => {
+            if (err) reject(err);
+            resolve(rows || []);
+          }
+        );
+      });
+    }
+
+    // Get completed targets for scoring
+    const completedTargets = await new Promise((resolve, reject) => {
       db.all(
-        "SELECT * FROM targets WHERE room_id = ?",
+        "SELECT * FROM targets WHERE room_id = ? AND status = 'reached'",
         [roomId],
         (err, rows) => {
           if (err) reject(err);
@@ -577,13 +762,11 @@ module.exports = function (io, db) {
       hunters: 0,
     };
 
-    targets.forEach((target) => {
-      if (target.reached_by) {
-        // Find player who reached target
-        const player = players.find((p) => p.player_id === target.reached_by);
-        if (player && player.team === "runner") {
-          teamScores.runners += target.points_value;
-        }
+    completedTargets.forEach((target) => {
+      // Find player who reached target
+      const player = players.find((p) => p.player_id === target.player_id);
+      if (player && player.team === "runner") {
+        teamScores.runners += target.points_value;
       }
     });
 
@@ -634,8 +817,8 @@ module.exports = function (io, db) {
           lng: t.lng,
         },
         radiusLevel: t.radius_level,
-        reachedBy: t.reached_by,
         pointsValue: t.points_value,
+        playerId: t.player_id
       })),
       scores: teamScores,
       timeRemaining: gameTimeExpired
@@ -645,10 +828,12 @@ module.exports = function (io, db) {
   }
 
   async function checkTargetDiscovery(roomId, playerId, lat, lng) {
-    // Get targets for this room
+    console.log(`Checking target discovery for room ${roomId}, player ${playerId}`);
+    
+    // Get player's active targets
     const targets = await new Promise((resolve, reject) => {
       db.all(
-        "SELECT * FROM targets WHERE room_id = ? AND reached_by IS NULL",
+        "SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active'",
         [roomId],
         (err, rows) => {
           if (err) reject(err);
@@ -656,8 +841,24 @@ module.exports = function (io, db) {
         }
       );
     });
+    
+    console.log(`Found ${targets.length} active targets for player ${playerId}`);
+    
+    // If no targets, generate one
+    if (targets.length === 0) {
+      console.log(`No active targets for player ${playerId}, generating new target`);
+      const newTarget = await generateTargetForPlayer(roomId, playerId, lat, lng);
+      if (newTarget) {
+        console.log(`Generated new target for player ${playerId}:`, newTarget);
+        return {
+          isNew: true,
+          target: newTarget
+        };
+      }
+      return null;
+    }
 
-    // Check if player is in range of any targets
+    // Check if player is in range of any of their targets
     for (const target of targets) {
       const distance = geoUtils.calculateDistance(
         lat,
@@ -665,38 +866,22 @@ module.exports = function (io, db) {
         target.lat,
         target.lng
       );
+      
+      console.log(`Target ${target.target_id}: distance=${distance}m, radius=${target.radius_level}m`);
 
-      // Calculate radius in meters based on radius level
-      let radius;
-      switch (target.radius_level) {
-        case 2000:
-          radius = 2000;
-          break;
-        case 1000:
-          radius = 1000;
-          break;
-        case 500:
-          radius = 500;
-          break;
-        case 250:
-          radius = 250;
-          break;
-        case 125:
-          radius = 125;
-          break;
-        default:
-          radius = 2000;
-      }
-
-      if (distance <= radius) {
-        // Player is in range of this target
-        // If smallest radius (125m), mark as reached
-        if (target.radius_level === 125) {
+      // Check if player is within the target's radius
+      if (distance <= target.radius_level) {
+        console.log(`Player is in range of target ${target.target_id} (distance: ${distance}m, radius: ${target.radius_level}m)`);
+        
+        // If smallest radius (200m), mark as reached
+        if (target.radius_level === config.game.targetRadiusLevels[config.game.targetRadiusLevels.length - 1]) {
+          console.log(`Target reached - smallest radius (${target.radius_level}m)`);
+          
           // Update target as reached
           await new Promise((resolve, reject) => {
             db.run(
-              "UPDATE targets SET reached_by = ? WHERE target_id = ?",
-              [playerId, target.target_id],
+              "UPDATE targets SET status = 'reached', reached_at = ? WHERE target_id = ?",
+              [Date.now(), target.target_id],
               function (err) {
                 if (err) reject(err);
                 resolve(this.changes);
@@ -704,90 +889,234 @@ module.exports = function (io, db) {
             );
           });
 
+          // Generate a new target for the player
+          const newTarget = await generateTargetForPlayer(roomId, playerId, lat, lng);
+          
+          // Return both the reached target and the new target
           return {
-            targetId: target.target_id,
-            location: {
-              lat: target.lat,
-              lng: target.lng,
+            reachedTarget: {
+              targetId: target.target_id,
+              location: {
+                lat: target.lat,
+                lng: target.lng,
+              },
+              pointsValue: target.points_value,
             },
-            pointsValue: target.points_value,
+            newTarget: newTarget
           };
         }
-        // If larger radius, create smaller radius target
+        // If larger radius, create smaller radius target (narrowing the search)
         else {
-          // Calculate new radius level
-          let newRadiusLevel;
-          switch (target.radius_level) {
-            case 2000:
-              newRadiusLevel = 1000;
-              break;
-            case 1000:
-              newRadiusLevel = 500;
-              break;
-            case 500:
-              newRadiusLevel = 250;
-              break;
-            case 250:
-              newRadiusLevel = 125;
-              break;
-            default:
-              newRadiusLevel = 1000;
+          console.log(`Creating smaller radius target for ${target.target_id}`);
+          
+          // Find the current radius level index
+          const currentRadiusIndex = config.game.targetRadiusLevels.indexOf(target.radius_level);
+          
+          // If not found (shouldn't happen), use default next radius
+          if (currentRadiusIndex === -1) {
+            console.error(`Invalid radius level ${target.radius_level}`);
+            return null;
           }
-
-          // Generate offset for inner circle (not centered)
-          const { offsetLat, offsetLng } = geoUtils.generateRandomOffset(
-            target.lat,
-            target.lng,
-            target.radius_level,
-            newRadiusLevel
-          );
-
-          // Create new target with smaller radius
-          const newTargetId = uuidv4();
+          
+          // Get next smaller radius
+          const newRadiusLevel = config.game.targetRadiusLevels[currentRadiusIndex + 1];
+          console.log(`New radius level: ${newRadiusLevel}m (was ${target.radius_level}m)`);
+          
+          // Update target with smaller radius and more points
           await new Promise((resolve, reject) => {
             db.run(
-              "INSERT INTO targets (target_id, room_id, lat, lng, radius_level, points_value) VALUES (?, ?, ?, ?, ?, ?)",
-              [
-                newTargetId,
-                roomId,
-                offsetLat,
-                offsetLng,
-                newRadiusLevel,
-                target.points_value + 10,
-              ],
-              function (err) {
-                if (err) reject(err);
-                resolve(this.lastID);
-              }
-            );
-          });
-
-          // Delete old target
-          await new Promise((resolve, reject) => {
-            db.run(
-              "DELETE FROM targets WHERE target_id = ?",
-              [target.target_id],
+              "UPDATE targets SET radius_level = ?, points_value = points_value * ? WHERE target_id = ?",
+              [newRadiusLevel, config.game.targetPointsMultiplier, target.target_id],
               function (err) {
                 if (err) reject(err);
                 resolve(this.changes);
               }
             );
           });
-
-          // Return new target info
+          
+          // Return updated target with new radius
           return {
-            targetId: newTargetId,
-            location: {
-              lat: offsetLat,
-              lng: offsetLng,
-            },
-            radiusLevel: newRadiusLevel,
-            pointsValue: target.points_value + 10,
+            updatedTarget: {
+              targetId: target.target_id,
+              location: {
+                lat: target.lat,
+                lng: target.lng,
+              },
+              radiusLevel: newRadiusLevel,
+              pointsValue: Math.floor(target.points_value * config.game.targetPointsMultiplier),
+            }
           };
         }
       }
     }
 
+    // If no targets were reached but player has no active targets,
+    // generate a new one
+    if (targets.length === 0) {
+      const newTarget = await generateTargetForPlayer(roomId, playerId, lat, lng);
+      if (newTarget) {
+        return {
+          isNew: true,
+          target: newTarget
+        };
+      }
+    }
+
     return null;
+  }
+
+  async function generateTargetForPlayer(roomId, playerId, playerLat, playerLng) {
+    console.log(`Generating target for player ${playerId} in room ${roomId}`);
+    
+    // Get room info for central location and game boundary
+    const room = await new Promise((resolve, reject) => {
+      db.get("SELECT * FROM rooms WHERE room_id = ?", [roomId], (err, row) => {
+        if (err) reject(err);
+        resolve(row);
+      });
+    });
+    
+    if (!room) {
+      console.error(`Room ${roomId} not found when generating target`);
+      return null;
+    }
+    
+    // Calculate distance from center to determine if player is near boundary
+    const distanceFromCenter = geoUtils.calculateDistance(
+      playerLat, 
+      playerLng, 
+      room.central_lat, 
+      room.central_lng
+    );
+    
+    // Check if there are already active targets for this player
+    const existingTargets = await new Promise((resolve, reject) => {
+      db.all(
+        "SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active'",
+        [roomId, playerId],
+        (err, rows) => {
+          if (err) reject(err);
+          resolve(rows || []);
+        }
+      );
+    });
+    
+    // If player already has active targets, don't generate more
+    if (existingTargets.length > 0) {
+      console.log(`Player ${playerId} already has ${existingTargets.length} active targets`);
+      return existingTargets[0];
+    }
+    
+    // Generate a new target position - biased away from player and toward center
+    // if player is near boundary
+    let targetLat, targetLng, radius;
+    
+    // Maximum play area radius in meters
+    const maxRadius = config.game.defaultPlayAreaRadius;
+    
+    // If player is within 25% of boundary, try to generate targets toward center
+    const isBiasTowardCenter = distanceFromCenter > (maxRadius * 0.75);
+    
+    if (isBiasTowardCenter) {
+      console.log(`Player is near boundary, biasing target toward center`);
+      // Generate position between player and center
+      const bearing = geoUtils.calculateBearing(
+        playerLat, 
+        playerLng, 
+        room.central_lat, 
+        room.central_lng
+      );
+      
+      // Calculate a random distance (500m to 1500m) from player toward center
+      const distance = Math.random() * 1000 + 500;
+      const targetPos = geoUtils.calculateDestination(
+        playerLat, 
+        playerLng, 
+        bearing, 
+        distance
+      );
+      
+      targetLat = targetPos.lat;
+      targetLng = targetPos.lng;
+    } else {
+      // Generate a random position within 1500m of player
+      // but at least 500m away
+      const minDistance = 500;
+      const maxDistance = 1500;
+      const angle = Math.random() * 2 * Math.PI;
+      const distance = minDistance + Math.random() * (maxDistance - minDistance);
+      
+      const targetPos = geoUtils.calculateDestination(
+        playerLat, 
+        playerLng, 
+        angle, 
+        distance
+      );
+      
+      targetLat = targetPos.lat;
+      targetLng = targetPos.lng;
+    }
+    
+    // Check if the target is within the play area
+    const distanceTargetFromCenter = geoUtils.calculateDistance(
+      targetLat, 
+      targetLng, 
+      room.central_lat, 
+      room.central_lng
+    );
+    
+    // If target is outside play area, adjust it
+    if (distanceTargetFromCenter > maxRadius) {
+      console.log(`Target would be outside play area, adjusting`);
+      // Calculate bearing from center to target
+      const bearingFromCenter = geoUtils.calculateBearing(
+        room.central_lat, 
+        room.central_lng, 
+        targetLat, 
+        targetLng
+      );
+      
+      // Place target at boundary minus 100m for safety
+      const adjustedTargetPos = geoUtils.calculateDestination(
+        room.central_lat, 
+        room.central_lng, 
+        bearingFromCenter, 
+        maxRadius - 100
+      );
+      
+      targetLat = adjustedTargetPos.lat;
+      targetLng = adjustedTargetPos.lng;
+    }
+    
+    // Create target with initial radius
+    const targetId = uuidv4();
+    const initialRadius = config.game.targetRadiusLevels[0]; // Largest radius
+    const pointsValue = config.game.baseTargetPoints;
+    
+    await new Promise((resolve, reject) => {
+      db.run(
+        `INSERT INTO targets 
+        (target_id, room_id, player_id, lat, lng, radius_level, points_value, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
+        [targetId, roomId, playerId, targetLat, targetLng, initialRadius, pointsValue],
+        function (err) {
+          if (err) reject(err);
+          resolve(this.lastID);
+        }
+      );
+    });
+    
+    console.log(`Created new target ${targetId} for player ${playerId} at ${targetLat}, ${targetLng}`);
+    
+    // Return the created target
+    return {
+      targetId,
+      location: {
+        lat: targetLat,
+        lng: targetLng,
+      },
+      radiusLevel: initialRadius,
+      pointsValue
+    };
   }
 };

@@ -18,7 +18,7 @@ const playerController = {
       const player = await Player.getById(playerId);
 
       if (!player) {
-        return res.status(404).json({ error: "Player not found" });
+        return res.status(404).json({ error: "Player not found: " + playerId });
       }
 
       res.json({
@@ -59,7 +59,7 @@ const playerController = {
       const player = await Player.updateTeam(playerId, team);
 
       if (!player) {
-        return res.status(404).json({ error: "Player not found" });
+        return res.status(404).json({ error: "Player not found: " + playerId });
       }
 
       res.json({
@@ -100,7 +100,7 @@ const playerController = {
       const player = await Player.updateStatus(playerId, status);
 
       if (!player) {
-        return res.status(404).json({ error: "Player not found" });
+        return res.status(404).json({ error: "Player not found: " + playerId });
       }
 
       res.json({

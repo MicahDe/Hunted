@@ -25,6 +25,16 @@ const Game = {
 
   // Initialize the game
   init: function (playerInfo, socket, initialState) {
+    console.log("Initializing game with state:", initialState);
+    console.log("Player is on team:", playerInfo.team);
+    
+    // Check if targets are included in initialState
+    if (!initialState.targets || initialState.targets.length === 0) {
+      console.error("No targets in initial game state!");
+    } else {
+      console.log(`Found ${initialState.targets.length} targets in initial state`);
+    }
+
     // Store references
     this.playerInfo = playerInfo;
     this.socket = socket;
@@ -44,6 +54,7 @@ const Game = {
     this.startLocationTimer();
 
     // Update targets on map
+    console.log("Updating targets on map for team:", playerInfo.team);
     GameMap.updateTargets(initialState.targets, playerInfo.team);
   },
 
@@ -51,12 +62,6 @@ const Game = {
   initGameUI: function () {
     // Set team display
     UI.showTeamControls(this.playerInfo.team);
-
-    // Update score display
-    UI.updateScoreDisplay(
-      this.gameState.scores.hunters,
-      this.gameState.scores.runners
-    );
 
     // Update time display
     UI.updateTimeDisplay(this.gameState.timeRemaining);

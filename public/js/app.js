@@ -13,26 +13,15 @@ let gameState = {
   isRoomCreator: false,
 };
 
-// Initialize the application
 function initApp() {
-  // Set up event listeners
-  setupEventListeners();
-
-  // Initialize the UI utilities
+  setupAllEventListeners();
   UI.init();
-
-  // Initialize the game map
   GameMap.init();
-
-  // Setup Socket.IO connection
   setupSocketConnection();
-
-  // Check for existing session
-  checkExistingSession();
+  checkForExistingSession();
 }
 
-// Set up all event listeners
-function setupEventListeners() {
+function setupAllEventListeners() {
   // Splash screen buttons
   document.getElementById("create-room-btn").addEventListener("click", () => {
     UI.showScreen("create-room-screen");
@@ -85,7 +74,7 @@ function setupEventListeners() {
     .addEventListener("click", deleteLobby);
   document
     .getElementById("return-game-btn")
-    .addEventListener("click", returnToGame);
+    .addEventListener("click", returnToActiveGame);
 
   // Game controls
   document.getElementById("menu-btn").addEventListener("click", () => {
@@ -104,6 +93,13 @@ function setupEventListeners() {
     .getElementById("center-map-runner-btn")
     .addEventListener("click", () => {
       GameMap.centerOnPlayer();
+    });
+
+  document
+    .getElementById("request-target-btn")
+    .addEventListener("click", () => {
+      UI.showNotification("Requesting a new target...", "info");
+      socket.emit("request_target", { roomId: gameState.roomId });
     });
 
   document
@@ -185,10 +181,12 @@ function setupSocketConnection() {
   socket.on("room_deleted", handleRoomDeleted);
   socket.on("delete_success", handleDeleteSuccess);
   socket.on("game_started", handleGameStarted);
+  socket.on("new_target", handleNewTarget);
+  socket.on("target_radius_update", handleTargetRadiusUpdate);
 }
 
 // Check for existing session
-function checkExistingSession() {
+function checkForExistingSession() {
   const savedSession = localStorage.getItem("huntedGameSession");
 
   if (savedSession) {
@@ -450,10 +448,14 @@ function handleGameState(state) {
   if (currentScreen === "lobby-screen") {
     updateLobbyUI(state);
   } else if (currentScreen === "game-screen") {
-    Game.updateGameState(state);
+    if (!Game.gameState) {
+      // Game not initialized yet, do full initialization
+      Game.init(gameState, socket, state);
+    } else {
+      Game.updateGameState(state);
+    }
   }
 
-  // Check if game is over
   if (state.status === "completed" && currentScreen !== "game-over-screen") {
     handleGameOver({
       winner:
@@ -464,7 +466,6 @@ function handleGameState(state) {
   }
 }
 
-// Handle player joined event
 function handlePlayerJoined(data) {
   console.log("Player joined:", data);
 
@@ -477,22 +478,14 @@ function handlePlayerJoined(data) {
   }
 }
 
-// Handle player disconnected event
 function handlePlayerDisconnected(data) {
   console.log("Player disconnected:", data);
-
-  // Show notification
   UI.showNotification(`${data.username} disconnected`, "info");
-
-  // Request updated game state
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
 
-// Handle runner location update
 function handleRunnerLocation(data) {
   console.log("Runner location:", data);
-
-  // Only process if we're in game screen
   if (currentScreen === "game-screen") {
     // Update runner marker on map
     GameMap.updateRunnerLocation(data);
@@ -502,51 +495,50 @@ function handleRunnerLocation(data) {
 // Handle target reached event
 function handleTargetReached(data) {
   console.log("Target reached:", data);
-
-  // Show notification
   UI.showNotification(`${data.username} reached a target!`, "success");
-
-  // Update game state
   Game.updateGameState(data.gameState);
 }
 
-// Handle runner caught event
+// Handle new target event
+function handleNewTarget(data) {
+  console.log("New target received:", data);
+  if (data.target) {
+    UI.showNotification("New target available!", "info");
+    Game.updateGameState(data.gameState);
+  }
+}
+
+// Handle target radius update event
+function handleTargetRadiusUpdate(data) {
+  console.log("Target radius updated:", data);
+  UI.showNotification("You're getting closer to the target!", "info");
+  Game.updateGameState(data.gameState);
+}
+
 function handleRunnerCaught(data) {
   console.log("Runner caught:", data);
-
-  // Show notification
   UI.showNotification(`${data.username} has been caught!`, "warning");
 
-  // Check if it's the current player
+  // Check if we're the caught player
   if (data.caughtPlayerId === gameState.playerId) {
-    // Change team to hunter
+    // Change our team to hunter
     gameState.team = "hunter";
     saveGameSession();
-
-    // Update UI
     Game.updateTeamUI("hunter");
   }
 
-  // Request updated game state
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
 
-// Handle game over event
 function handleGameOver(data) {
   console.log("Game over:", data);
-
-  // Show game over screen
   UI.showScreen("game-over-screen");
-
-  // Update game over UI
   updateGameOverUI(data);
 }
 
-// Update game over UI
 function updateGameOverUI(data) {
   const state = data.gameState;
 
-  // Set winner display
   const winnerDisplay = document.getElementById("winner-display");
   winnerDisplay.textContent = `Winners: ${
     data.winner === "runners" ? "Runners!" : "Hunters!"
@@ -574,7 +566,6 @@ function updateGameOverUI(data) {
   document.getElementById("runners-caught").textContent = runnersCaught;
 }
 
-// Start the game
 function startGame() {
   console.log("Starting game...", gameState);
 
@@ -592,40 +583,24 @@ function startGame() {
   socket.emit("start_game", { roomId: gameState.roomId });
 }
 
-// Handle game started event
+// We have received the game start event from the server
 function handleGameStarted(data) {
   console.log("Game started:", data);
-
-  // Hide loading
   UI.hideLoading();
-
   if (!data.gameState) {
     console.error("No game state received from server when starting game");
     UI.showNotification("Error starting game: No game state received", "error");
     return;
   }
-
-  // Start game UI
   startGameUI(data.gameState);
 }
 
-// Start game UI - called when the game starts
 function startGameUI(state) {
   console.log("Starting game UI with state:", state);
-
-  // Hide loading
   UI.hideLoading();
-
-  // Show game screen
   UI.showScreen("game-screen");
-  
-  // Update current screen variable
   currentScreen = "game-screen";
-  
-  // Update game state with game status
   gameState.gameStatus = state.status;
-  
-  // Save session to localStorage with updated status
   saveGameSession();
 
   // Initialize the game
@@ -644,7 +619,6 @@ function startGameUI(state) {
   }
 }
 
-// Delete the lobby
 function deleteLobby() {
   if (!gameState.isRoomCreator) {
     return UI.showNotification(
@@ -653,67 +627,48 @@ function deleteLobby() {
     );
   }
 
-  // Confirm deletion
   if (
     confirm(
       "Are you sure you want to delete this lobby? All players will be disconnected."
     )
   ) {
     UI.showLoading("Deleting lobby...");
-
-    // Emit delete room event
     socket.emit("delete_room", { roomId: gameState.roomId });
   }
 }
 
-// Leave the lobby
 function leaveLobby() {
-  // Clear game state
   resetGameState();
-
-  // Disconnect socket
   socket.disconnect();
-
+  
   // Reconnect socket for future games
   socket.connect();
-
-  // Go back to splash screen
   UI.showScreen("splash-screen");
 }
 
-// Report self as caught
 function reportSelfCaught() {
-  // Create confirm dialog
   if (
     confirm(
       "Are you sure you want to report yourself as caught? This cannot be undone."
     )
   ) {
-    // Emit event to server
     socket.emit("player_caught", {
       caughtPlayerId: gameState.playerId,
     });
   }
 }
 
-// Leave the game
 function leaveGame() {
-  // Create confirm dialog
   if (
     confirm(
       "Are you sure you want to leave the game? Your progress will be lost."
     )
   ) {
-    // Clear game state
     resetGameState();
-
-    // Disconnect socket
     socket.disconnect();
 
     // Reconnect socket for future games
     socket.connect();
-
-    // Go back to splash screen
     UI.showScreen("splash-screen");
   }
 }
@@ -734,53 +689,30 @@ function setupNewGame() {
 
 // Return to home screen after game over
 function returnToHome() {
-  // Clear game state
   resetGameState();
-
-  // Go back to splash screen
   UI.showScreen("splash-screen");
 }
 
-// Handle room deleted event
 function handleRoomDeleted(data) {
   console.log("Room deleted:", data);
-
-  // Hide loading indicator
   UI.hideLoading();
-
-  // Show notification
   UI.showNotification("The room has been deleted by the host", "warning");
-
-  // Clear game state
   resetGameState();
-
-  // Go back to splash screen
   UI.showScreen("splash-screen");
 }
 
-// Handle delete success event
 function handleDeleteSuccess(data) {
   console.log("Delete success:", data);
-
-  // Hide loading
   UI.hideLoading();
-
-  // Show notification
   UI.showNotification("Room deleted successfully", "success");
-
-  // Clear game state
   resetGameState();
-
-  // Go back to splash screen
   UI.showScreen("splash-screen");
 }
 
-// Reset game state
 function resetGameState() {
   // Save username for convenience
   const username = gameState.username;
 
-  // Reset game state
   gameState = {
     roomId: null,
     playerId: null,
@@ -805,16 +737,11 @@ window.Game.getGameState = function () {
 };
 
 // Function to return to an active game from the lobby
-function returnToGame() {
-  // Show game screen
+function returnToActiveGame() {
   UI.showScreen("game-screen");
-  
-  // Update current screen variable
   currentScreen = "game-screen";
-  
   // Request the latest game state
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
 
-// Initialize app when DOM is loaded
 document.addEventListener("DOMContentLoaded", initApp);

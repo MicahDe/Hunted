@@ -182,7 +182,7 @@ class Player {
 
     // Validate player
     if (!player) {
-      throw new Error("Player not found");
+      throw new Error("Player not found: " + playerId);
     }
 
     // Validate player is a runner
