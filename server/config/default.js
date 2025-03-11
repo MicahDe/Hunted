@@ -27,7 +27,7 @@ module.exports = {
     maxTargets: 10,
 
     // Target radius levels in meters
-    targetRadiusLevels: [3200, 1600, 800, 400, 200],
+    targetRadiusLevels: [1000, 500, 250, 125],
 
     // Base points per target
     baseTargetPoints: 2,

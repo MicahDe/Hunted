@@ -934,7 +934,7 @@ module.exports = function (io, db) {
       if (distance <= target.radius_level) {
         console.log(`Player is in range of target ${target.target_id} (distance: ${distance}m, radius: ${target.radius_level}m)`);
         
-        // If smallest radius (200m), mark as reached
+        // If smallest radius (125m), mark as reached
         if (target.radius_level === config.game.targetRadiusLevels[config.game.targetRadiusLevels.length - 1]) {
           console.log(`Target reached - smallest radius (${target.radius_level}m)`);
           
