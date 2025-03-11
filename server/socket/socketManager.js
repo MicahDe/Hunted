@@ -1126,7 +1126,7 @@ module.exports = function (io, db) {
         playerLng, 
         room.central_lat, 
         room.central_lng
-      );
+      ) - 45 + Math.random() * 90;
       
       // Calculate a random distance (1000m to 1500m) from player toward center
       const distance = Math.random() * 500 + 1000;
@@ -1141,10 +1141,10 @@ module.exports = function (io, db) {
       targetLng = targetPos.lng;
     } else {
       // Generate a random position within 1500m of player
-      // but at least 500m away
-      const minDistance = 500;
+      // but at least 1000m away
+      const minDistance = 1000;
       const maxDistance = 1500;
-      const angle = Math.random() * 2 * Math.PI;
+      const angle = Math.random() * 360; // 0-360 degrees
       const distance = minDistance + Math.random() * (maxDistance - minDistance);
       
       const targetPos = geoUtils.calculateDestination(
