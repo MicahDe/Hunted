@@ -214,8 +214,14 @@ module.exports = function (io, db) {
         // Update player location in database
         await updatePlayerLocation(playerId, lat, lng);
 
-        // If player is runner, broadcast to hunters
+        // If player is runner, store location history and broadcast to hunters
         if (team === "runner") {
+          // Store location in history
+          await storeLocationHistory(playerId, roomId, lat, lng);
+          
+          // Get location history for this player
+          const locationHistory = await getPlayerLocationHistory(playerId);
+
           // Get all hunters in the room
           const hunters = await getTeamPlayers(roomId, "hunter");
 
@@ -226,6 +232,7 @@ module.exports = function (io, db) {
             lat,
             lng,
             timestamp: Date.now(),
+            locationHistory: locationHistory // Include history
           };
 
           // Instead of trying to send to each hunter by player_id (which is not a socket ID),
@@ -659,6 +666,66 @@ module.exports = function (io, db) {
     });
   }
 
+  // Store location history point
+  async function storeLocationHistory(playerId, roomId, lat, lng) {
+    const timestamp = Date.now();
+    
+    // Only store a point if it's significantly different from the last one
+    // or if enough time has passed (at least 10 seconds)
+    const lastPoint = await getLastLocationHistoryPoint(playerId);
+    
+    if (lastPoint) {
+      // If less than 10 seconds have passed and location hasn't changed significantly, don't store
+      const timeDiff = timestamp - lastPoint.timestamp;
+      const distanceChanged = geoUtils.calculateDistance(lat, lng, lastPoint.lat, lastPoint.lng);
+      
+      if (timeDiff < 10000 && distanceChanged < 5) {
+        return; // Don't store if not enough change
+      }
+    }
+    
+    return new Promise((resolve, reject) => {
+      db.run(
+        "INSERT INTO location_history (player_id, room_id, lat, lng, timestamp) VALUES (?, ?, ?, ?, ?)",
+        [playerId, roomId, lat, lng, timestamp],
+        function (err) {
+          if (err) reject(err);
+          resolve(this.lastID);
+        }
+      );
+    });
+  }
+
+  // Get the last location history point for a player
+  async function getLastLocationHistoryPoint(playerId) {
+    return new Promise((resolve, reject) => {
+      db.get(
+        "SELECT * FROM location_history WHERE player_id = ? ORDER BY timestamp DESC LIMIT 1",
+        [playerId],
+        function (err, row) {
+          if (err) reject(err);
+          resolve(row);
+        }
+      );
+    });
+  }
+
+  // Get location history for a player (last 30 minutes)
+  async function getPlayerLocationHistory(playerId) {
+    const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
+    
+    return new Promise((resolve, reject) => {
+      db.all(
+        "SELECT lat, lng, timestamp FROM location_history WHERE player_id = ? AND timestamp > ? ORDER BY timestamp ASC",
+        [playerId, thirtyMinutesAgo],
+        function (err, rows) {
+          if (err) reject(err);
+          resolve(rows || []);
+        }
+      );
+    });
+  }
+
   async function getTeamPlayers(roomId, team, status = null) {
     return new Promise((resolve, reject) => {
       let query = "SELECT * FROM players WHERE room_id = ? AND team = ?";
@@ -690,47 +757,27 @@ module.exports = function (io, db) {
   }
 
   async function getGameState(roomId, requestingPlayerId = null) {
-    // Get room info
-    const room = await new Promise((resolve, reject) => {
-      db.get("SELECT * FROM rooms WHERE room_id = ?", [roomId], (err, row) => {
-        if (err) reject(err);
-        resolve(row);
-      });
-    });
-
-    if (!room) return null;
-
-    // Get all players
-    const players = await new Promise((resolve, reject) => {
-      db.all(
-        "SELECT * FROM players WHERE room_id = ?",
-        [roomId],
-        (err, rows) => {
-          if (err) reject(err);
-          resolve(rows || []);
-        }
-      );
-    });
-
-    // Get targets based on requesting player
-    let targets = [];
-    if (requestingPlayerId) {
-      // If specific player is requesting, get only their targets
-      targets = await new Promise((resolve, reject) => {
-        db.all(
-          "SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active'",
-          [roomId, requestingPlayerId],
-          (err, rows) => {
+    try {
+      // Get room details
+      const room = await new Promise((resolve, reject) => {
+        db.get(
+          "SELECT * FROM rooms WHERE room_id = ?",
+          [roomId],
+          (err, row) => {
             if (err) reject(err);
-            resolve(rows || []);
+            resolve(row);
           }
         );
       });
-    } else {
-      // For general game state, get all active targets
-      targets = await new Promise((resolve, reject) => {
+
+      if (!room) {
+        return null;
+      }
+
+      // Get all players
+      const players = await new Promise((resolve, reject) => {
         db.all(
-          "SELECT * FROM targets WHERE room_id = ? AND status = 'active'",
+          "SELECT * FROM players WHERE room_id = ?",
           [roomId],
           (err, rows) => {
             if (err) reject(err);
@@ -738,133 +785,107 @@ module.exports = function (io, db) {
           }
         );
       });
-    }
-
-    // Get completed targets for scoring
-    const completedTargets = await new Promise((resolve, reject) => {
-      db.all(
-        "SELECT * FROM targets WHERE room_id = ? AND status = 'reached'",
-        [roomId],
-        (err, rows) => {
-          if (err) reject(err);
-          resolve(rows || []);
-        }
-      );
-    });
-
-    // Initialize player scores and team scores
-    const playerScores = {};
-    players.forEach(player => {
-      playerScores[player.player_id] = 0;
-    });
-    
-    // Calculate team scores (still maintain team scores for compatibility)
-    const teamScores = {
-      runners: 0,
-      hunters: 0,
-    };
-
-    // Add points from completed targets
-    completedTargets.forEach((target) => {
-      // Add points to the individual player who reached the target
-      if (target.player_id && playerScores.hasOwnProperty(target.player_id)) {
-        playerScores[target.player_id] += target.points_value;
-      }
       
-      // Find player who reached target (for team scores)
-      const player = players.find((p) => p.player_id === target.player_id);
-      if (player && player.team === "runner") {
-        teamScores.runners += target.points_value;
-      }
-    });
-    
-    // Get all target discoveries to add points from discovering target radius levels
-    const targetDiscoveries = await new Promise((resolve, reject) => {
-      db.all(
-        "SELECT * FROM target_discoveries WHERE player_id IN (SELECT player_id FROM players WHERE room_id = ?)",
-        [roomId],
-        (err, rows) => {
-          if (err) reject(err);
-          resolve(rows || []);
-        }
-      );
-    });
-    
-    // Add points from target discoveries
-    targetDiscoveries.forEach((discovery) => {
-      // Add points to individual player who discovered the target
-      if (discovery.player_id && playerScores.hasOwnProperty(discovery.player_id)) {
-        playerScores[discovery.player_id] += discovery.points_earned;
-      }
+      // Get location history for all runners
+      const runnerLocationHistory = {};
+      const runnerPlayers = players.filter(player => player.team === 'runner');
       
-      // Find player who discovered the target (for team scores)
-      const player = players.find((p) => p.player_id === discovery.player_id);
-      if (player && player.team === "runner") {
-        teamScores.runners += discovery.points_earned;
+      // Get location history for each runner
+      for (const runner of runnerPlayers) {
+        const history = await getPlayerLocationHistory(runner.player_id);
+        if (history && history.length > 0) {
+          runnerLocationHistory[runner.player_id] = {
+            playerId: runner.player_id,
+            username: runner.username,
+            lat: runner.last_lat,
+            lng: runner.last_lng,
+            timestamp: runner.last_ping_time,
+            locationHistory: history
+          };
+        }
       }
-    });
 
-    // Check if game time has expired
-    const now = Date.now();
-    const gameTimeExpired =
-      room.start_time + room.game_duration * 60 * 1000 < now;
+      // Get all targets for this room
+      const targets = await new Promise((resolve, reject) => {
+        db.all(
+          "SELECT * FROM targets WHERE room_id = ?",
+          [roomId],
+          (err, rows) => {
+            if (err) reject(err);
+            resolve(rows || []);
+          }
+        );
+      });
 
-    // Determine game status
-    let gameStatus = room.status;
-
-    if (gameStatus === "active" && gameTimeExpired) {
-      gameStatus = "completed";
-      // Update room status
-      await updateRoomStatus(roomId, "completed");
-    }
-
-    // Add scores to players array for easy access
-    players.forEach(player => {
-      player.score = playerScores[player.player_id] || 0;
-    });
-
-    // Prepare game state object
-    return {
-      roomId: room.room_id,
-      roomName: room.room_name,
-      startTime: room.start_time,
-      endTime: room.end_time,
-      gameDuration: room.game_duration,
-      centralLocation: {
-        lat: room.central_lat,
-        lng: room.central_lng,
-      },
-      status: gameStatus,
-      players: players.map((p) => ({
-        playerId: p.player_id,
-        username: p.username,
-        team: p.team,
-        status: p.status,
-        lastLocation:
-          p.last_lat && p.last_lng
-            ? {
-                lat: p.last_lat,
-                lng: p.last_lng,
-              }
-            : null,
-        lastPing: p.last_ping_time,
-        score: p.score,
-      })),
-      targets: targets.map((t) => ({
-        targetId: t.target_id,
+      // Format targets for client
+      const formattedTargets = targets.map((target) => ({
+        targetId: target.target_id,
+        playerId: target.player_id,
         location: {
-          lat: t.lat,
-          lng: t.lng,
+          lat: target.lat,
+          lng: target.lng,
         },
-        radiusLevel: t.radius_level,
-        pointsValue: t.points_value,
-        playerId: t.player_id
-      })),
-      scores: teamScores,
-      timeRemaining: gameTimeExpired
-        ? 0
-        : (room.start_time + room.game_duration * 60 * 1000 - now) / 1000,
-    };
+        radiusLevel: target.radius_level,
+        pointsValue: target.points_value,
+        status: target.status,
+        reachedBy: target.player_id,
+        reachedAt: target.reached_at,
+      }));
+
+      // Format players for client
+      const formattedPlayers = players.map((player) => ({
+        playerId: player.player_id,
+        roomId: player.room_id,
+        username: player.username,
+        team: player.team,
+        status: player.status,
+        location: {
+          lat: player.last_lat,
+          lng: player.last_lng,
+        },
+        lastPingTime: player.last_ping_time,
+      }));
+
+      // Calculate scores for all players
+      for (const player of formattedPlayers) {
+        // Get all target discoveries for this player
+        const discoveries = await new Promise((resolve, reject) => {
+          db.all(
+            "SELECT * FROM target_discoveries WHERE player_id = ?",
+            [player.playerId],
+            (err, rows) => {
+              if (err) reject(err);
+              resolve(rows || []);
+            }
+          );
+        });
+        
+        // Sum up points earned
+        player.score = discoveries.reduce((sum, discovery) => sum + discovery.points_earned, 0);
+      }
+
+      // Create game state object
+      const gameState = {
+        roomId: room.room_id,
+        roomName: room.room_name,
+        gameDuration: room.game_duration,
+        centralLocation: {
+          lat: room.central_lat,
+          lng: room.central_lng,
+        },
+        startTime: room.start_time,
+        endTime: room.end_time,
+        status: room.status,
+        players: formattedPlayers,
+        targets: formattedTargets,
+        runnerLocationHistory: runnerLocationHistory
+      };
+
+      return gameState;
+    } catch (error) {
+      console.error("Error getting game state:", error);
+      return null;
+    }
   }
 
   async function checkTargetDiscovery(roomId, playerId, lat, lng) {

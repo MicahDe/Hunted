@@ -87,7 +87,19 @@ function initDatabase() {
             FOREIGN KEY(player_id) REFERENCES players(player_id) ON DELETE CASCADE,
             FOREIGN KEY(target_id) REFERENCES targets(target_id) ON DELETE CASCADE
         )`);
-      });
+
+    // Location history table to track player movement
+    db.run(`CREATE TABLE IF NOT EXISTS location_history (
+            history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id TEXT NOT NULL,
+            room_id TEXT NOT NULL,
+            lat REAL NOT NULL,
+            lng REAL NOT NULL,
+            timestamp INTEGER NOT NULL,
+            FOREIGN KEY(player_id) REFERENCES players(player_id) ON DELETE CASCADE,
+            FOREIGN KEY(room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
+        )`);
+  });
 }
 
 // API Routes

@@ -452,6 +452,7 @@ function handleGameState(state) {
       // Game not initialized yet, do full initialization
       Game.init(gameState, socket, state);
     } else {
+      // Ensure we always update the game state
       Game.updateGameState(state);
     }
   }

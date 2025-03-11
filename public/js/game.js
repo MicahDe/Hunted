@@ -24,48 +24,74 @@ const Game = {
   },
 
   // Initialize the game
-  init: function (playerInfo, socket, initialState) {
+  init: function (gameState, socket, initialState) {
     console.log("Initializing game with state:", initialState);
-    console.log("Player is on team:", playerInfo.team);
+    console.log("Player is on team:", gameState.team);
 
     // Store references
-    this.playerInfo = playerInfo;
+    this.gameState = { ...initialState }; // Make sure we have the FULL game state
     this.socket = socket;
-    this.gameState = initialState;
+    this.playerInfo = {
+      playerId: gameState.playerId,
+      username: gameState.username,
+      team: gameState.team,
+    };
 
-    // Initialize map
+    // Set up map
     GameMap.initGameMap(
       initialState.centralLocation.lat,
       initialState.centralLocation.lng
     );
 
+    // Calculate time remaining
+    if (initialState.startTime && initialState.gameDuration) {
+      const now = Date.now();
+      const endTime = initialState.startTime + (initialState.gameDuration * 60 * 1000);
+      const timeRemaining = Math.max(0, Math.floor((endTime - now) / 1000));
+      this.gameState.timeRemaining = timeRemaining;
+    }
+
     // Initialize UI
+    UI.initialized = false; // Force UI initialization
     this.initGameUI();
 
     // Start timers
     this.startGameTimer();
     this.startLocationTimer();
 
+    // Initialize runner locations if available in the game state
+    if (initialState.runnerLocationHistory && gameState.team === "hunter") {
+      Object.values(initialState.runnerLocationHistory).forEach(runnerData => {
+        GameMap.updateRunnerLocation(runnerData);
+      });
+    }
+
     // Update targets on map
-    console.log("Updating targets on map for team:", playerInfo.team);
-    GameMap.updateTargets(initialState.targets, playerInfo.team);
+    console.log("Updating targets on map for team:", gameState.team);
+    GameMap.updateTargets(initialState.targets, gameState.team);
   },
 
   // Initialize game UI
   initGameUI: function () {
-    // Set team display
+    console.log("Initializing game UI with state:", this.gameState);
+    
+    // Set team display and controls
     UI.showTeamControls(this.playerInfo.team);
-
+    
     // Update time display
-    UI.updateTimeDisplay(this.gameState.timeRemaining);
-
+    if (this.gameState.timeRemaining) {
+      UI.updateTimeDisplay(this.gameState.timeRemaining);
+    }
+    
     // Update player lists in menu
-    UI.updateGamePlayerLists(this.gameState.players);
+    if (this.gameState.players) {
+      UI.updateGamePlayerLists(this.gameState.players);
+    }
 
     // Initialize player score display
     if (this.playerInfo.team === "runner") {
       // Find current player in players list to get score
-      const playerInfo = this.gameState.players.find(
+      const playerInfo = this.gameState.players?.find(
         (p) => p.playerId === this.playerInfo.playerId
       );
       UI.updatePlayerScore(playerInfo ? playerInfo.score : 0);
@@ -78,6 +104,9 @@ const Game = {
     if (this.playerInfo.team === "runner") {
       this.updateTargetDistance();
     }
+    
+    // Mark UI as initialized
+    UI.initialized = true;
   },
 
   // Start game timer
@@ -142,25 +171,40 @@ const Game = {
 
   // Update game state
   updateGameState: function (state) {
+    console.log("Updating game state:", state);
+    
     // Store new state
-    this.gameState = state;
+    this.gameState = { ...state };
+    
+    // If time remaining is not explicitly provided, calculate it
+    if (!this.gameState.timeRemaining && this.gameState.startTime && this.gameState.gameDuration) {
+      const now = Date.now();
+      const endTime = this.gameState.startTime + (this.gameState.gameDuration * 60 * 1000);
+      this.gameState.timeRemaining = Math.max(0, Math.floor((endTime - now) / 1000));
+    }
 
     // Update target display for runners
-    if (this.playerInfo.team === "runner") {
+    if (this.playerInfo && this.playerInfo.team === "runner") {
       this.updateTargetDistance();
       
       // Find current player in players list to get score
-      const playerInfo = state.players.find(
+      const playerInfo = state.players?.find(
         (p) => p.playerId === this.playerInfo.playerId
       );
-      UI.updatePlayerScore(playerInfo ? playerInfo.score : 0);
+      if (playerInfo) {
+        UI.updatePlayerScore(playerInfo.score || 0);
+      }
     }
 
     // Update player lists in menu
-    UI.updateGamePlayerLists(state.players);
+    if (state.players) {
+      UI.updateGamePlayerLists(state.players);
+    }
 
-    // Update targets on map
-    GameMap.updateTargets(state.targets, this.playerInfo.team);
+    // Update targets on map (always call this to ensure targets are properly updated)
+    if (this.playerInfo) {
+      GameMap.updateTargets(state.targets, this.playerInfo.team);
+    }
 
     // Check for caught runners
     if (state.players) {
@@ -174,6 +218,11 @@ const Game = {
         GameMap.removeRunnerMarker(runner.playerId);
       });
     }
+    
+    // Update timer display
+    if (this.gameState.timeRemaining) {
+      UI.updateTimeDisplay(this.gameState.timeRemaining);
+    }
 
     // If we're in the lobby, also update the lobby player lists
     if (window.currentScreen === "lobby-screen") {
@@ -185,6 +234,8 @@ const Game = {
 
   // Update target distance display
   updateTargetDistance: function () {
+    console.log("Updating target distance with game state:", this.gameState);
+    
     if (
       !this.gameState ||
       !this.gameState.targets ||
@@ -196,8 +247,12 @@ const Game = {
 
     const { lat, lng } = GameMap.currentLocation;
 
-    // Find active targets (not reached)
-    const activeTargets = this.gameState.targets.filter((t) => !t.reachedBy);
+    // Find active targets for this player (not reached)
+    const activeTargets = this.gameState.targets.filter(
+      t => t.playerId === this.playerInfo.playerId && t.status !== 'reached'
+    );
+    
+    console.log("Active targets:", activeTargets);
 
     // Calculate distance to closest target
     const closestDistance = GameMap.getClosestTargetDistance(
@@ -205,6 +260,8 @@ const Game = {
       lng,
       activeTargets
     );
+    
+    console.log("Closest target distance:", closestDistance);
 
     // Update UI
     UI.updateTargetDistance(closestDistance);
