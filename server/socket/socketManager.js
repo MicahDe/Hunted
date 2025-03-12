@@ -12,7 +12,7 @@ module.exports = function (io, db) {
     // Create a room
     socket.on("create_room", async (data) => {
       try {
-        const { roomName, username, team, gameDuration, centralLat, centralLng } = data;
+        const { roomName, username, team, gameDuration, playRadius, centralLat, centralLng } = data;
         let roomId;
 
         // Create new room
@@ -22,13 +22,15 @@ module.exports = function (io, db) {
           roomName,
           data.gameDuration,
           data.centralLat,
-          data.centralLng
+          data.centralLng,
+          data.playRadius
         );
 
         return socket.emit("room_created", {
           roomId,
           roomName,
           gameDuration,
+          playRadius,
           centralLat,
           centralLng,
         });
@@ -566,17 +568,19 @@ module.exports = function (io, db) {
     roomName,
     gameDuration,
     centralLat,
-    centralLng
+    centralLng,
+    playRadius
   ) {
     return new Promise((resolve, reject) => {
       db.run(
-        "INSERT INTO rooms (room_id, room_name, game_duration, central_lat, central_lng, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO rooms (room_id, room_name, game_duration, central_lat, central_lng, play_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
           roomId,
           roomName,
           gameDuration,
           centralLat,
           centralLng,
+          playRadius,
           Date.now(),
           "lobby",
         ],
@@ -758,32 +762,27 @@ module.exports = function (io, db) {
 
   async function getGameState(roomId, requestingPlayerId = null) {
     try {
+      console.log(`Getting game state for room: ${roomId}`);
+      
       // Get room details
       const room = await new Promise((resolve, reject) => {
-        db.get(
-          "SELECT * FROM rooms WHERE room_id = ?",
-          [roomId],
-          (err, row) => {
-            if (err) reject(err);
-            resolve(row);
-          }
-        );
+        db.get("SELECT * FROM rooms WHERE room_id = ?", [roomId], (err, row) => {
+          if (err) reject(err);
+          resolve(row);
+        });
       });
 
       if (!room) {
+        console.error(`Room ${roomId} not found when getting game state`);
         return null;
       }
 
-      // Get all players
+      // Get all players in the room
       const players = await new Promise((resolve, reject) => {
-        db.all(
-          "SELECT * FROM players WHERE room_id = ?",
-          [roomId],
-          (err, rows) => {
-            if (err) reject(err);
-            resolve(rows || []);
-          }
-        );
+        db.all("SELECT * FROM players WHERE room_id = ?", [roomId], (err, rows) => {
+          if (err) reject(err);
+          resolve(rows || []);
+        });
       });
       
       // Get location history for all runners
@@ -864,11 +863,12 @@ module.exports = function (io, db) {
         player.score = discoveries.reduce((sum, discovery) => sum + discovery.points_earned, 0);
       }
 
-      // Create game state object
+      // Construct game state
       const gameState = {
         roomId: room.room_id,
         roomName: room.room_name,
         gameDuration: room.game_duration,
+        playRadius: room.play_radius,
         centralLocation: {
           lat: room.central_lat,
           lng: room.central_lng,
@@ -1113,7 +1113,7 @@ module.exports = function (io, db) {
     let targetLat, targetLng, radius;
     
     // Maximum play area radius in meters
-    const maxRadius = config.game.defaultPlayAreaRadius;
+    const maxRadius = room.play_radius || config.game.defaultPlayAreaRadius;
     
     // If player is within 25% of boundary, try to generate targets toward center
     const isBiasTowardCenter = distanceFromCenter > (maxRadius * 0.75);

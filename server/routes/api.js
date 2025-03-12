@@ -37,7 +37,7 @@ router.get("/rooms/:roomId", (req, res) => {
 
 // Create new room
 router.post("/rooms", (req, res) => {
-  const { roomName, gameDuration, centralLat, centralLng } = req.body;
+  const { roomName, gameDuration, centralLat, centralLng, playRadius } = req.body;
 
   if (!roomName || !gameDuration || !centralLat || !centralLng) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -58,16 +58,18 @@ router.post("/rooms", (req, res) => {
 
       const roomId = uuidv4();
       const startTime = Date.now();
+      const radius = playRadius || config.game.defaultPlayAreaRadius;
 
       // Create new room
       db.run(
-        "INSERT INTO rooms (room_id, room_name, game_duration, central_lat, central_lng, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO rooms (room_id, room_name, game_duration, central_lat, central_lng, play_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
           roomId,
           roomName,
           gameDuration,
           centralLat,
           centralLng,
+          radius,
           startTime,
           "lobby",
         ],
@@ -78,7 +80,7 @@ router.post("/rooms", (req, res) => {
 
           // Generate initial targets for the room (5-10 targets)
           const targetCount = Math.floor(Math.random() * 6) + 5;
-          const playAreaRadius = config.game.defaultPlayAreaRadius; // Use config value instead of hardcoding
+          const playAreaRadius = radius; // Use provided radius instead of config value
 
           const targets = geoUtils.generateTargets(
             centralLat,

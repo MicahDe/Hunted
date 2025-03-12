@@ -215,7 +215,7 @@ const GameMap = {
   },
 
   // Initialize the game map
-  initGameMap: function (centerLat, centerLng, boundaries, playAreaRadius = 5000) {
+  initGameMap: function (centerLat, centerLng, playAreaRadius = 5000) {
     // Get map container
     const mapContainer = document.getElementById("game-map");
     if (!mapContainer) return;
@@ -446,7 +446,7 @@ const GameMap = {
 
       // Add accuracy circle
       this.playerAccuracyCircle = L.circle([latitude, longitude], {
-        radius: accuracy,
+        radius: accuracy * 0.5,
         color: "#4cc9f0",
         fillColor: "#4cc9f0",
         fillOpacity: 0.2,

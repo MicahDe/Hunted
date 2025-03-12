@@ -227,6 +227,7 @@ function createRoom() {
   const roomName = document.getElementById("room-name").value.trim();
   const username = document.getElementById("creator-username").value.trim();
   const gameDuration = parseInt(document.getElementById("game-duration").value);
+  const playRadius = parseInt(document.getElementById("play-radius").value);
   const teamBtn = document.querySelector(
     "#create-room-form .team-btn.selected"
   );
@@ -269,6 +270,7 @@ function createRoom() {
     username,
     team,
     gameDuration,
+    playRadius,
     centralLat: location.lat,
     centralLng: location.lng,
   });
@@ -375,6 +377,14 @@ function updateLobbyUI(state) {
     durationElement.textContent = `${state.gameDuration} min`;
   }
 
+  // Update play radius display
+  const playRadiusElement = document.getElementById("play-radius-display");
+  if (playRadiusElement && state.playRadius) {
+    // Convert meters to kilometers for display
+    const radiusInKm = (state.playRadius / 1000).toFixed(1);
+    playRadiusElement.textContent = `${radiusInKm}km radius`;
+  }
+
   const targetCountElement = document.getElementById("target-count-display");
   if (targetCountElement && state.targets) {
     targetCountElement.textContent = `${state.targets.length}`;
@@ -382,7 +392,7 @@ function updateLobbyUI(state) {
 
   // Update lobby map
   if (state.centralLocation) {
-    GameMap.initLobbyMap(state.centralLocation.lat, state.centralLocation.lng);
+    GameMap.initLobbyMap(state.centralLocation.lat, state.centralLocation.lng, state.playRadius);
   }
   
   // Show/hide buttons based on game status

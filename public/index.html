@@ -88,6 +88,18 @@
               />
             </div>
             <div class="form-group">
+              <label for="play-radius">Play Area Radius (meters)</label>
+              <input
+                type="number"
+                id="play-radius"
+                min="1000"
+                max="10000"
+                step="500"
+                value="5000"
+                required
+              />
+            </div>
+            <div class="form-group">
               <label>Starting Team</label>
               <div class="team-selector">
                 <button
@@ -204,7 +216,7 @@
               </div>
               <div class="setting-item">
                 <span class="setting-label">Play Area:</span>
-                <span>5km radius</span>
+                <span id="play-radius-display">5km radius</span>
               </div>
               <div class="setting-item">
                 <span class="setting-label">Targets:</span>

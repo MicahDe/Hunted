@@ -40,7 +40,8 @@ const Game = {
     // Set up map
     GameMap.initGameMap(
       initialState.centralLocation.lat,
-      initialState.centralLocation.lng
+      initialState.centralLocation.lng,
+      initialState.playRadius
     );
 
     // Calculate time remaining

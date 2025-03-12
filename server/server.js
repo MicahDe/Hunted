@@ -42,6 +42,7 @@ function initDatabase() {
             game_duration INTEGER,
             central_lat REAL,
             central_lng REAL,
+            play_radius INTEGER DEFAULT 5000,
             start_time INTEGER,
             end_time INTEGER,
             status TEXT
