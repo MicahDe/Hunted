@@ -455,11 +455,6 @@ const GameMap = {
       this.playerAccuracyCircle.setRadius(accuracy);
     }
 
-    // If player is a runner, check for targets
-    if (gameState.team === "runner") {
-      Game.checkTargetProximity(latitude, longitude);
-    }
-
     // Emit location update to server
     Game.emitLocationUpdate(latitude, longitude);
   },
@@ -905,44 +900,6 @@ const GameMap = {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return R * c; // Distance in meters
-  },
-
-  // Get closest target and distance to it
-  getClosestTargetDistance: function (lat, lng, targets) {
-    if (!targets || targets.length === 0) {
-      console.log("No targets or empty target array");
-      return null;
-    }
-
-    let closestDistance = Infinity;
-
-    targets.forEach((target) => {
-      // Skip reached targets - now use status property
-      if (target.status === 'reached') {
-        console.log("Skipping reached target:", target.targetId);
-        return;
-      }
-
-      if (!target.location || typeof target.location.lat !== 'number' || typeof target.location.lng !== 'number') {
-        console.log("Invalid target location:", target);
-        return;
-      }
-
-      const distance = this.calculateDistance(
-        lat,
-        lng,
-        target.location.lat,
-        target.location.lng
-      );
-
-      console.log(`Target ${target.targetId}: distance = ${distance}m`);
-
-      if (distance < closestDistance) {
-        closestDistance = distance;
-      }
-    });
-
-    return closestDistance === Infinity ? null : closestDistance;
   },
 
   // Start timer to update runner labels

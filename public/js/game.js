@@ -99,11 +99,6 @@ const Game = {
       // Hide score for hunters
       UI.updatePlayerScore(0);
     }
-
-    // Set initial target distance for runners
-    if (this.playerInfo.team === "runner") {
-      this.updateTargetDistance();
-    }
   },
 
   // Start game timer
@@ -182,7 +177,6 @@ const Game = {
 
     // Update target display for runners
     if (this.playerInfo && this.playerInfo.team === "runner") {
-      this.updateTargetDistance();
       
       // Find current player in players list to get score
       const playerInfo = state.players?.find(
@@ -227,49 +221,6 @@ const Game = {
         updatePlayerLists(state.players);
       }
     }
-  },
-
-  // Update target distance display
-  updateTargetDistance: function () {
-    console.log("Updating target distance with game state:", this.gameState);
-    
-    if (
-      !this.gameState ||
-      !this.gameState.targets ||
-      !GameMap.currentLocation
-    ) {
-      UI.updateTargetDistance(null);
-      return;
-    }
-
-    const { lat, lng } = GameMap.currentLocation;
-
-    // Find active targets for this player (not reached)
-    const activeTargets = this.gameState.targets.filter(
-      t => t.playerId === this.playerInfo.playerId && t.status !== 'reached'
-    );
-    
-    console.log("Active targets:", activeTargets);
-
-    // Calculate distance to closest target
-    const closestDistance = GameMap.getClosestTargetDistance(
-      lat,
-      lng,
-      activeTargets
-    );
-    
-    console.log("Closest target distance:", closestDistance);
-
-    // Update UI
-    UI.updateTargetDistance(closestDistance);
-  },
-
-  // Check proximity to targets
-  checkTargetProximity: function (lat, lng) {
-    if (!this.gameState || !this.gameState.targets) return;
-
-    // Update target distance display
-    this.updateTargetDistance();
   },
 
   // Update team UI

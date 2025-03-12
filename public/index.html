@@ -11,6 +11,11 @@
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="assets/icons/favicon.ico" />
 
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cutive+Mono&family=Libre+Barcode+128&display=swap" rel="stylesheet">
+
     <!-- External CSS -->
     <link
       rel="stylesheet"
@@ -40,8 +45,8 @@
       <!-- Splash Screen -->
       <div id="splash-screen" class="screen active">
         <div class="logo-container">
+          <div class="barcode">christdied4us</div>
           <h1 class="game-title">HUNTED</h1>
-          <h2 class="game-subtitle">GPS Pursuit Game</h2>
         </div>
         <div class="splash-buttons">
           <button id="create-room-btn" class="primary-btn">Create Room</button>
@@ -248,17 +253,17 @@
       <div id="game-screen" class="screen">
         <div class="game-header">
           <div class="game-status">
-            <div class="status-team">
+            <div class="status-team status-item">
               <div id="player-team" class="team-indicator">
-                Team: <span id="team-value">-</span>
+                <span id="team-value">-</span>
               </div>
             </div>
-            <div class="status-time">
+            <div class="status-time status-item">
               <div id="time-remaining" class="time-indicator">
-                Time: <span id="time-value">--:--</span>
+                <span id="time-value">--:--</span>
               </div>
             </div>
-            <div class="status-score" id="player-score-container">
+            <div class="status-score status-item" id="player-score-container">
               <div id="player-score" class="score-indicator">
                 Score: <span id="score-value">0</span>
               </div>
@@ -282,9 +287,6 @@
             <button id="request-target-btn" class="control-btn">
               <img src="assets/icons/target.svg" alt="Request Target" />
             </button>
-            <div id="target-info" class="target-info">
-              Target: <span id="target-distance">Searching...</span>
-            </div>
             <button id="caught-btn" class="danger-btn">I've Been Caught</button>
           </div>
         </div>

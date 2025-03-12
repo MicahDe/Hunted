@@ -210,7 +210,6 @@ const UI = {
       const listItem = document.createElement("li");
       listItem.className = "player-item";
       listItem.innerHTML = `
-                <img src="assets/icons/hunter.svg" alt="Hunter" class="player-avatar">
                 <span class="player-name">${hunter.username}</span>
                 ${
                   hunter.status === "caught"
@@ -226,37 +225,15 @@ const UI = {
       const listItem = document.createElement("li");
       listItem.className = "player-item";
       listItem.innerHTML = `
-                <img src="assets/icons/runner.svg" alt="Runner" class="player-avatar">
                 <span class="player-name">${runner.username}</span>
                 ${
                   runner.status === "caught"
                     ? '<span class="player-status caught">Caught</span>'
-                    : `<span class="player-status score">Score: ${runner.score || 0}</span>`
+                    : `<span class="player-status score">${runner.score || 0}</span>`
                 }
             `;
       runnerList.appendChild(listItem);
     });
-  },
-
-  // Update target distance display
-  updateTargetDistance: function (distance) {
-    const targetDistance = document.getElementById("target-distance");
-    if (!targetDistance) return;
-
-    if (distance === null) {
-      targetDistance.textContent = "Searching...";
-      return;
-    }
-
-    // Format distance as "X.XX km" or "XXX m"
-    let formattedDistance;
-    if (distance >= 1000) {
-      formattedDistance = `${(distance / 1000).toFixed(2)} km`;
-    } else {
-      formattedDistance = `${Math.round(distance)} m`;
-    }
-
-    targetDistance.textContent = formattedDistance;
   },
 
   // Show team controls based on player's team
