@@ -22,10 +22,6 @@ module.exports = {
     // Default game duration in minutes
     defaultGameDuration: 60,
 
-    // Default number of targets per game
-    minTargets: 5,
-    maxTargets: 10,
-
     // Target radius levels in meters
     targetRadiusLevels: [1000, 500, 250, 125],
 

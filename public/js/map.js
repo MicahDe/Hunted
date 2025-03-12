@@ -7,6 +7,7 @@ const GameMap = {
   // Map instances
   setupMap: null, // Map for room setup
   gameMap: null, // Map for gameplay
+  lobbyMap: null, // Map for lobby screen
 
   // Map markers and features
   playerMarker: null,
@@ -34,7 +35,6 @@ const GameMap = {
 
   // Map icons
   icons: {
-    hunter: null,
     runner: null,
     target: null,
     player: null,
@@ -54,14 +54,6 @@ const GameMap = {
       html: `<div class="map-marker-player-inner"></div>`,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
-    });
-
-    // Hunter icon
-    this.icons.hunter = L.divIcon({
-      className: "map-marker-hunter",
-      html: `<img src="assets/icons/hunter.svg" alt="Hunter">`,
-      iconSize: [36, 36],
-      iconAnchor: [18, 18],
     });
 
     // Runner icon
@@ -898,28 +890,6 @@ const GameMap = {
     }
   },
 
-  // Format timestamp relative to now
-  formatTimestamp: function (timestamp) {
-    const now = Date.now();
-    const diff = now - timestamp;
-
-    if (diff < 60000) {
-      // Less than a minute
-      return "Just now";
-    } else if (diff < 3600000) {
-      // Less than an hour
-      const minutes = Math.floor(diff / 60000);
-      return `${minutes} minute${minutes > 1 ? "s" : ""} ago`;
-    } else {
-      // Format as time
-      const date = new Date(timestamp);
-      return date.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    }
-  },
-
   // Calculate distance between two points
   calculateDistance: function (lat1, lng1, lat2, lng2) {
     // Haversine formula
@@ -1097,40 +1067,5 @@ const GameMap = {
         });
       }
     });
-  },
-
-  // Clean up map resources
-  cleanup: function () {
-    // Stop location tracking
-    this.stopLocationTracking();
-    
-    // Clear label update timer
-    if (this.labelUpdateTimer) {
-      clearInterval(this.labelUpdateTimer);
-      this.labelUpdateTimer = null;
-    }
-
-    // Clean up maps
-    if (this.setupMap) {
-      this.setupMap.remove();
-      this.setupMap = null;
-    }
-
-    if (this.gameMap) {
-      this.gameMap.remove();
-      this.gameMap = null;
-    }
-
-    // Clear all markers and circles
-    this.playerMarker = null;
-    this.selectedLocationMarker = null;
-    this.runnerMarkers = {};
-    this.runnerLabels = {};
-    this.runnerHistoryMarkers = {};
-    this.runnerHistoryLines = {};
-    this.targetMarkers = {};
-    this.targetCircles = {};
-    this.boundaryCircle = null;
-    this.runnerDataCache = {};
   },
 };

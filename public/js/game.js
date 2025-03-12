@@ -53,7 +53,6 @@ const Game = {
     }
 
     // Initialize UI
-    UI.initialized = false; // Force UI initialization
     this.initGameUI();
 
     // Start timers
@@ -105,9 +104,6 @@ const Game = {
     if (this.playerInfo.team === "runner") {
       this.updateTargetDistance();
     }
-    
-    // Mark UI as initialized
-    UI.initialized = true;
   },
 
   // Start game timer
@@ -330,23 +326,5 @@ const Game = {
   // Get current game state
   getGameState: function () {
     return this.gameState;
-  },
-
-  // Clean up game
-  cleanup: function () {
-    // Clear timers
-    clearInterval(this.timers.gameTimer);
-    clearInterval(this.timers.locationTimer);
-    
-    // Stop location tracking
-    GameMap.stopLocationTracking();
- 
-    // Clean up map
-    GameMap.cleanup();
-
-    // Clear game state
-    this.gameState = null;
-    this.socket = null;
-    this.playerInfo = null;
   },
 };
