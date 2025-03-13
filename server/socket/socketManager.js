@@ -1,5 +1,5 @@
 const { v4: uuidv4 } = require("uuid");
-const geoUtils = require("../utils/geoUtils");
+const geoUtils = require("../../shared/utils/geoUtils");
 const config = require("../config/default");
 
 module.exports = function (io, db) {
@@ -921,18 +921,24 @@ module.exports = function (io, db) {
 
     // Check if player is in range of any of their targets
     for (const target of targets) {
-      const distance = geoUtils.calculateDistance(
+      // Get all possible radius levels from config
+      const allRadiusLevels = config.game.targetRadiusLevels;
+      
+      // Check if player is within any of the nested target circles
+      const isInTargetArea = geoUtils.isPlayerInNestedTargetArea(
         lat,
         lng,
         target.lat,
-        target.lng
+        target.lng,
+        target.radius_level,
+        allRadiusLevels
       );
       
-      console.log(`Target ${target.target_id}: distance=${distance}m, radius=${target.radius_level}m`);
+      console.log(`Target ${target.target_id}: isInTargetArea=${isInTargetArea}, current radius=${target.radius_level}m`);
 
-      // Check if player is within the target's radius
-      if (distance <= target.radius_level) {
-        console.log(`Player is in range of target ${target.target_id} (distance: ${distance}m, radius: ${target.radius_level}m)`);
+      // Check if player is within the target's area
+      if (isInTargetArea) {
+        console.log(`Player is in range of target ${target.target_id} (current radius: ${target.radius_level}m)`);
         
         // If smallest radius (125m), mark as reached
         if (target.radius_level === config.game.targetRadiusLevels[config.game.targetRadiusLevels.length - 1]) {

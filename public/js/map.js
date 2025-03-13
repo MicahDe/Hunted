@@ -801,44 +801,69 @@ const GameMap = {
           this.targetMarkers[target.targetId].bindPopup(popupContent);
         }
       }
-
-      // Check if target circle exists
+      
+      // For circle placement, we need to know all radius levels for this target
+      // In the real data, we only have the current level, but for visualization
+      // we'll generate all possible levels here for demo purposes
+      
+      // Check if target circle exists - if it does, we need to regenerate all circles
+      // First, remove existing target circles for this target
       if (this.targetCircles[target.targetId]) {
-        // Update circle position 
-        this.targetCircles[target.targetId].setLatLng([
+        // If it's a feature group (nested circles), remove all layers
+        if (this.targetCircles[target.targetId].getLayers) {
+          this.gameMap.removeLayer(this.targetCircles[target.targetId]);
+        } else {
+          // If it's a single circle, remove it
+          this.gameMap.removeLayer(this.targetCircles[target.targetId]);
+        }
+        delete this.targetCircles[target.targetId];
+      }
+      
+      // Only create circles for runner
+      if (playerTeam === "runner") {
+        // Create a feature group to hold all circles
+        this.targetCircles[target.targetId] = L.featureGroup().addTo(this.gameMap);
+        
+        // Generate radius levels from the game config
+        // For demo, we'll use 4 levels: [125, 250, 500, 1000]
+        // In production, these should be retrieved from the server
+        const radiusLevels = [125, 250, 500, 1000];
+        
+        // Filter levels that are less than or equal to the current radius level
+        const activeRadiusLevels = radiusLevels.filter(r => r <= target.radiusLevel);
+        
+        // If no active levels (shouldn't happen), just use the current radius
+        if (activeRadiusLevels.length === 0) {
+          activeRadiusLevels.push(target.radiusLevel);
+        }
+        
+        // Generate positions for nested circles
+        const circlePositions = geoUtils.generateNestedCirclePositions(
           target.location.lat,
           target.location.lng,
-        ]);
+          activeRadiusLevels
+        );
         
-        // Update radius
-        this.targetCircles[target.targetId].setRadius(target.radiusLevel);
-        console.log("Updated existing target circle with radius:", target.radiusLevel);
-        
-        let circleColor = '#ef7d54';
-        
-        this.targetCircles[target.targetId].setStyle({
-          color: circleColor,
-          fillColor: circleColor
+        // Create each circle at its calculated position
+        circlePositions.forEach((position, index) => {
+          const circleColor = '#ef7d54';
+          
+          // Create circle with the specified radius at the calculated position
+          const circle = L.circle([position.lat, position.lng], {
+            radius: position.radius,
+            color: circleColor,
+            fillColor: circleColor,
+            fillOpacity: 0.2,
+            weight: 2,
+            dashArray: "5, 5",
+            className: `map-circle-target map-circle-target-level-${position.radius}`,
+          });
+          
+          // Add the circle to the feature group
+          this.targetCircles[target.targetId].addLayer(circle);
         });
-      } else {
-        // Only create circle for runner
-        if (playerTeam === "runner") {
-          let circleColor = '#ef7d54';          
-          // Create circle
-          this.targetCircles[target.targetId] = L.circle(
-            [target.location.lat, target.location.lng],
-            {
-              radius: target.radiusLevel,
-              color: circleColor,
-              fillColor: circleColor,
-              fillOpacity: 0.2,
-              weight: 2,
-              dashArray: "5, 5",
-              className: `map-circle-target map-circle-target-level-${target.radiusLevel}`,
-            }
-          ).addTo(this.gameMap);
-          console.log("Created new target circle with radius:", target.radiusLevel);
-        }
+        
+        console.log("Created new nested target circles");
       }
     });
 
@@ -887,19 +912,8 @@ const GameMap = {
 
   // Calculate distance between two points
   calculateDistance: function (lat1, lng1, lat2, lng2) {
-    // Haversine formula
-    const R = 6371e3; // Earth radius in meters
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lng2 - lng1) * Math.PI) / 180;
-
-    const a =
-      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c; // Distance in meters
+    // Use the shared geoUtils function
+    return geoUtils.calculateDistance(lat1, lng1, lat2, lng2);
   },
 
   // Start timer to update runner labels

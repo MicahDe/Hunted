@@ -13,6 +13,7 @@ const io = socketIO(server);
 // Middleware
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../public")));
+app.use('/shared', express.static(path.join(__dirname, "../shared")));
 
 // Database setup
 const dbPath = path.join(__dirname, "../database/hunted.db");

@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
-const geoUtils = require("../utils/geoUtils");
+const geoUtils = require("../../shared/utils/geoUtils");
 const config = require("../config/default");
 
 // Get database from server.js

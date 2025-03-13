@@ -199,12 +199,122 @@ function calculateDestination(lat, lng, bearing, distance) {
   };
 }
 
-module.exports = {
-  calculateDistance,
-  generateRandomPoint,
-  generateRandomOffset,
-  generateTargets,
-  isPointInCircle,
-  calculateBearing,
-  calculateDestination,
-};
+/**
+ * Calculate position for an internally tangent circle
+ * @param {number} outerRadius - Radius of outer circle in meters
+ * @param {number} innerRadius - Radius of inner circle in meters
+ * @param {number} innerLat - Latitude of inner circle center in degrees
+ * @param {number} innerLng - Longitude of inner circle center in degrees
+ * @returns {Object} Object with lat and lng properties of outer circle center
+ */
+function calculateInternallyTangentCirclePosition(outerRadius, innerRadius, innerLat, innerLng) {
+  // Calculate the distance between centers (difference of radii for internally tangent circles)
+  const distanceBetweenCenters = outerRadius - innerRadius;
+  
+  // Create a hash by combining the values of lat, lng and innerRadius
+  const hashValue = (innerLat * 1000000) + (innerLng * 10000) + innerRadius;
+  // Use a simple transformative function to generate an angle between 0 and 2π
+  const deterministicAngle = ((hashValue * 9973) % 628) / 100; // 9973 is a prime number, mod 628 then divide by 100 to get 0-6.28
+  
+  // Calculate the new position
+  const outerLat = innerLat + (distanceBetweenCenters * Math.sin(deterministicAngle) / 111320); // Approx meters per degree latitude
+  const outerLng = innerLng + (distanceBetweenCenters * Math.cos(deterministicAngle) / (111320 * Math.cos(innerLat * Math.PI / 180))); // Adjust for longitude
+  
+  return { lat: outerLat, lng: outerLng };
+}
+
+/**
+ * Generate positions for nested internally tangent circles
+ * @param {number} targetLat - Latitude of target (innermost circle) in degrees
+ * @param {number} targetLng - Longitude of target (innermost circle) in degrees
+ * @param {Array} radiusLevels - Array of radius levels in meters, from smallest to largest
+ * @returns {Array} Array of objects with lat, lng, and radius properties
+ */
+function generateNestedCirclePositions(targetLat, targetLng, radiusLevels) {
+  // Sort radius levels in ascending order (smallest to largest)
+  const sortedRadii = [...radiusLevels].sort((a, b) => a - b);
+  
+  // Initialize with the smallest circle at the target location
+  const positions = [{ 
+    lat: targetLat,
+    lng: targetLng,
+    radius: sortedRadii[0]
+  }];
+  
+  // Generate positions for larger circles
+  for (let i = 1; i < sortedRadii.length; i++) {
+    const innerCircle = positions[i-1];
+    const newPosition = calculateInternallyTangentCirclePosition(
+      sortedRadii[i],
+      innerCircle.radius,
+      innerCircle.lat,
+      innerCircle.lng
+    );
+    
+    positions.push({
+      lat: newPosition.lat,
+      lng: newPosition.lng,
+      radius: sortedRadii[i]
+    });
+  }
+  
+  return positions;
+}
+
+/**
+ * Check if a player is within any of the nested target circles
+ * @param {number} playerLat - Player latitude in degrees
+ * @param {number} playerLng - Player longitude in degrees
+ * @param {number} targetLat - Target latitude in degrees
+ * @param {number} targetLng - Target longitude in degrees
+ * @param {number} targetRadius - Current target radius level in meters
+ * @param {Array} radiusLevels - Array of all possible radius levels in meters
+ * @returns {boolean} True if player is within any of the nested circles
+ */
+function isPlayerInNestedTargetArea(playerLat, playerLng, targetLat, targetLng, targetRadius, radiusLevels) {
+  // Filter radius levels to only include those less than or equal to the current target radius
+  const activeRadiusLevels = radiusLevels.filter(r => r <= targetRadius);
+  
+  // Generate positions for all nested circles
+  const circlePositions = generateNestedCirclePositions(targetLat, targetLng, activeRadiusLevels);
+  
+  // Check if player is within any of the circles
+  for (const position of circlePositions) {
+    const distanceToCircle = calculateDistance(playerLat, playerLng, position.lat, position.lng);
+    if (distanceToCircle <= position.radius) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  // Node.js environment
+  module.exports = {
+    calculateDistance,
+    generateRandomPoint,
+    generateRandomOffset,
+    generateTargets,
+    isPointInCircle,
+    calculateBearing,
+    calculateDestination,
+    calculateInternallyTangentCirclePosition,
+    generateNestedCirclePositions,
+    isPlayerInNestedTargetArea,
+  };
+} else if (typeof window !== 'undefined') {
+  // Browser environment
+  window.geoUtils = {
+    calculateDistance,
+    generateRandomPoint,
+    generateRandomOffset,
+    generateTargets,
+    isPointInCircle,
+    calculateBearing,
+    calculateDestination,
+    calculateInternallyTangentCirclePosition,
+    generateNestedCirclePositions,
+    isPlayerInNestedTargetArea,
+  };
+}
