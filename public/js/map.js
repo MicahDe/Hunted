@@ -244,7 +244,7 @@ const GameMap = {
     // Add OpenStreetMap tiles
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        '&copy;<a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy;Micah De Silva',
     }).addTo(this.gameMap);
 
     // Add zoom control to top right
