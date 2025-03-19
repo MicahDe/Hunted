@@ -145,6 +145,8 @@ function setupSocketConnection() {
       "Disconnected from server. Trying to reconnect...",
       "error"
     );
+    socket.connect();
+    socket.emit("resync_game_state", { roomId: gameState.roomId });
   });
 
   socket.on("connect_error", (error) => {
@@ -499,7 +501,6 @@ function handlePlayerDisconnected(data) {
 }
 
 function handleRunnerLocation(data) {
-  console.log("Runner location:", data);
   if (currentScreen === "game-screen") {
     // Update runner marker on map
     GameMap.updateRunnerLocation(data);
