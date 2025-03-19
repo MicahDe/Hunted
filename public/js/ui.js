@@ -64,7 +64,7 @@ const UI = {
 
     // Reset form fields
     document.getElementById("room-name").value = "";
-    document.getElementById("zone-activation-delay").value = 60;
+    document.getElementById("zone-activation-delay").value = 180;
 
     // Reset team selection
     const teamBtns = document.querySelectorAll("#create-room-form .team-btn");

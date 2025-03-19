@@ -82,29 +82,6 @@
               />
             </div>
             <div class="form-group">
-              <label for="zone-activation-delay">Zone Activation Delay (seconds)</label>
-              <input
-                type="number"
-                id="zone-activation-delay"
-                min="10"
-                max="300"
-                value="60"
-                required
-              />
-            </div>
-            <div class="form-group">
-              <label for="play-radius">Play Area Radius (meters)</label>
-              <input
-                type="number"
-                id="play-radius"
-                min="1000"
-                max="10000"
-                step="500"
-                value="5000"
-                required
-              />
-            </div>
-            <div class="form-group">
               <label>Starting Team</label>
               <div class="team-selector">
                 <button
@@ -115,22 +92,40 @@
                   <img src="assets/icons/hunter.svg" alt="Hunter" />
                   <span>Hunter</span>
                 </button>
-                <button
-                  type="button"
-                  class="team-btn runner-team"
-                  data-team="runner"
-                >
-                  <img src="assets/icons/runner.svg" alt="Runner" />
-                  <span>Runner</span>
-                </button>
               </div>
             </div>
             <div class="form-group">
-              <label>Starting Location</label>
+              <label for="zone-activation-delay">Zone Activation Delay (seconds)</label>
+              <input
+                type="number"
+                id="zone-activation-delay"
+                min="1"
+                max="600"
+                value="180"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label>Runner Target Location</label>
               <div id="setup-map" class="setup-map"></div>
               <div class="location-info">
-                <span>Tap map to set starting point</span>
+                <span>Tap map to set center of target area</span>
                 <div id="selected-location"></div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="play-radius">Runner Target Radius (meters)</label>
+              <input
+                type="number"
+                id="play-radius"
+                min="1000"
+                max="10000"
+                step="500"
+                value="5000"
+                required
+              />
+              <div class="location-info">
+                <span>The radius within the Runner Target Location that Runner targets will be generated</span>
               </div>
             </div>
             <button type="submit" class="primary-btn">Create Room</button>
@@ -222,10 +217,6 @@
               <div class="setting-item">
                 <span class="setting-label">Play Area:</span>
                 <span id="play-radius-display">5km radius</span>
-              </div>
-              <div class="setting-item">
-                <span class="setting-label">Targets:</span>
-                <span id="target-count-display">Loading...</span>
               </div>
             </div>
           </div>

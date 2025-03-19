@@ -304,7 +304,9 @@ p {
 }
 
 .primary-btn:hover,
-.primary-btn:focus {
+.primary-btn:focus,
+.secondary-btn:hover,
+.secondary-btn:focus {
   background-color: var(--color-secondary);
   transform: translateY(-2px);
   box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
@@ -926,6 +928,7 @@ textarea:focus {
   .splash-buttons {
     flex-direction: row;
     max-width: 500px;
+    justify-content: center;
   }
 
   .lobby-controls,

@@ -380,11 +380,6 @@ function updateLobbyUI(state) {
     playRadiusElement.textContent = `${radiusInKm}km radius`;
   }
 
-  const targetCountElement = document.getElementById("target-count-display");
-  if (targetCountElement && state.targets) {
-    targetCountElement.textContent = `${state.targets.length}`;
-  }
-
   // Update lobby map
   if (state.centralLocation) {
     GameMap.initLobbyMap(state.centralLocation.lat, state.centralLocation.lng, state.playRadius);

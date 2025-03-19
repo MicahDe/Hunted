@@ -23,7 +23,7 @@ module.exports = {
     defaultGameDuration: 60,
 
     // Target radius levels in meters
-    targetRadiusLevels: [1000, 500, 250, 125],
+    targetRadiusLevels: [2000, 1000, 500, 250, 125],
 
     // Base points per target
     baseTargetPoints: 2,

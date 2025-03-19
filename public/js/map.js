@@ -820,10 +820,8 @@ const GameMap = {
         // Create a feature group to hold all circles
         this.targetCircles[target.targetId] = L.featureGroup().addTo(this.gameMap);
         
-        // Generate radius levels from the game config
-        // For demo, we'll use 4 levels: [125, 250, 500, 1000]
-        // In production, these should be retrieved from the server
-        const radiusLevels = [125, 250, 500, 1000];
+        // Get radius levels from the game config
+        const radiusLevels = config.game.targetRadiusLevels;
         
         // Generate positions for nested circles
         const circlePositions = geoUtils.generateNestedCirclePositions(
