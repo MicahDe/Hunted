@@ -160,6 +160,10 @@ const Game = {
   updateZoneStatusDisplay: function(targets) {
     const zoneStatusElement = document.getElementById("zone-status-value");
     if (!zoneStatusElement) return;
+
+
+    const zoneEnclosingElement = document.getElementById("zone-status-container");
+    zoneEnclosingElement.style.display = "block";
     
     // Find the runner's active target (should only be one)
     const myTargets = targets.filter(target => 

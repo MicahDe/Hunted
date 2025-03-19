@@ -3,6 +3,7 @@
  * Uses Leaflet.js with OpenStreetMap
  */
 
+
 const GameMap = {
   // Map instances
   setupMap: null, // Map for room setup
@@ -259,14 +260,16 @@ const GameMap = {
     this.gameMap.setView([centerLat, centerLng], 14);
 
     // Add game boundary circle
-    this.boundaryCircle = L.circle([centerLat, centerLng], {
-      radius: playAreaRadius,
-      color: "#2a3990",
-      fillColor: "#ffffff",
-      fillOpacity: 0.1,
-      weight: 2,
-      dashArray: "5, 10",
-    }).addTo(this.gameMap);
+    if (gameState.team === "hunter") {
+      this.boundaryCircle = L.circle([centerLat, centerLng], {
+        radius: playAreaRadius,
+        color: "#2a3990",
+        fillColor: "#ffffff",
+        fillOpacity: 0.1,
+        weight: 2,
+        dashArray: "5, 10",
+      }).addTo(this.gameMap);
+    }
 
     // Start tracking player location
     this.startLocationTracking();
@@ -773,7 +776,7 @@ const GameMap = {
       }
 
       // Check if target marker exists
-      if (this.targetMarkers[target.targetId]) {
+      /*if (this.targetMarkers[target.targetId]) {
         // Update marker position
         this.targetMarkers[target.targetId].setLatLng([
           target.location.lat,
@@ -800,7 +803,7 @@ const GameMap = {
                   `;
           this.targetMarkers[target.targetId].bindPopup(popupContent);
         }
-      }
+      }*/
       
       // Check if target circle exists - if it does, we need to regenerate all circles
       // First, remove existing target circles for this target
@@ -821,7 +824,7 @@ const GameMap = {
         this.targetCircles[target.targetId] = L.featureGroup().addTo(this.gameMap);
         
         // Get radius levels from the game config
-        const radiusLevels = config.game.targetRadiusLevels;
+        const radiusLevels = [2000, 1000, 500, 250, 125]; // Should really be getting this from config.game.targetRadiusLevels
         
         // Generate positions for nested circles
         const circlePositions = geoUtils.generateNestedCirclePositions(

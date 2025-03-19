@@ -223,8 +223,8 @@
           <div class="lobby-section">
             <h3>Game Location</h3>
             <div id="lobby-map" class="lobby-map"></div>
-            <div class="location-info">
-              <span>All players must be within the circle to play</span>
+            <div id="runner-map-message" class="location-info" style="display: none;">
+              <span>Map is only visible to hunters. As a runner, your goal is to navigate to increasingly smaller zones that will be revealed during the game.</span>
             </div>
           </div>
           <div class="lobby-controls">
@@ -249,7 +249,7 @@
                 <span id="team-value">-</span>
               </div>
             </div>
-            <div class="status-time status-item">
+            <div class="status-time status-item" id="zone-status-container" style="display: none;">
               <div id="zone-status" class="time-indicator">
                 <span id="zone-status-value">No Zone</span>
               </div>

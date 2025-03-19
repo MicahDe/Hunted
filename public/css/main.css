@@ -825,7 +825,7 @@ textarea:focus {
 /* Notifications */
 .notification-container {
   position: fixed;
-  top: var(--spacing-4);
+  top: var(--spacing-10);
   left: 50%;
   transform: translateX(-50%);
   z-index: var(--z-index-toast);

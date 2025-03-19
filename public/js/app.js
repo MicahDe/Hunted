@@ -380,9 +380,25 @@ function updateLobbyUI(state) {
     playRadiusElement.textContent = `${radiusInKm}km radius`;
   }
 
-  // Update lobby map
-  if (state.centralLocation) {
+  // Update lobby map only if the player is a hunter
+  if (state.centralLocation && gameState.team === "hunter") {
     GameMap.initLobbyMap(state.centralLocation.lat, state.centralLocation.lng, state.playRadius);
+    // Hide runner message
+    const runnerMessage = document.getElementById("runner-map-message");
+    if (runnerMessage) {
+      runnerMessage.style.display = "none";
+    }
+  } else {
+    // Hide the lobby map container for runners
+    const mapContainer = document.getElementById("lobby-map");
+    if (mapContainer) {
+      mapContainer.style.display = "none";
+    }
+    // Show runner message
+    const runnerMessage = document.getElementById("runner-map-message");
+    if (runnerMessage) {
+      runnerMessage.style.display = "block";
+    }
   }
   
   // Show/hide buttons based on game status
