@@ -96,13 +96,6 @@ function setupAllEventListeners() {
     });
 
   document
-    .getElementById("request-target-btn")
-    .addEventListener("click", () => {
-      UI.showNotification("Requesting a new target...", "info");
-      socket.emit("request_target", { roomId: gameState.roomId });
-    });
-
-  document
     .getElementById("caught-btn")
     .addEventListener("click", reportSelfCaught);
 
@@ -183,6 +176,8 @@ function setupSocketConnection() {
   socket.on("game_started", handleGameStarted);
   socket.on("new_target", handleNewTarget);
   socket.on("target_radius_update", handleTargetRadiusUpdate);
+  socket.on("zone_activated", handleZoneActivated);
+  socket.on("runner_won", handleRunnerWon);
 }
 
 // Check for existing session
@@ -226,7 +221,7 @@ function checkForExistingSession() {
 function createRoom() {
   const roomName = document.getElementById("room-name").value.trim();
   const username = document.getElementById("creator-username").value.trim();
-  const gameDuration = parseInt(document.getElementById("game-duration").value);
+  const zoneActivationDelay = parseInt(document.getElementById("zone-activation-delay").value);
   const playRadius = parseInt(document.getElementById("play-radius").value);
   const teamBtn = document.querySelector(
     "#create-room-form .team-btn.selected"
@@ -269,7 +264,7 @@ function createRoom() {
     roomName,
     username,
     team,
-    gameDuration,
+    zoneActivationDelay,
     playRadius,
     centralLat: location.lat,
     centralLng: location.lng,
@@ -372,9 +367,9 @@ function updateLobbyUI(state) {
   }
 
   // Update game settings
-  const durationElement = document.getElementById("game-duration-display");
-  if (durationElement) {
-    durationElement.textContent = `${state.gameDuration} min`;
+  const zoneDelayElement = document.getElementById("zone-activation-delay-display");
+  if (zoneDelayElement) {
+    zoneDelayElement.textContent = `${state.zoneActivationDelay} sec`;
   }
 
   // Update play radius display
@@ -524,7 +519,7 @@ function handleTargetRadiusUpdate(data) {
   if (data.pointsValue && data.earnedPoints) {
     UI.showNotification(`You earned ${data.earnedPoints} points! Target is getting smaller!`, "success");
   } else {
-    UI.showNotification("You're getting closer to the target!", "info");
+    UI.showNotification("Zone captured! New zone has been revealed...", "info");
   }
   
   // Update game state
@@ -792,6 +787,24 @@ function returnToActiveGame() {
   UI.showScreen("game-screen");
   currentScreen = "game-screen";
   // Request the latest game state
+  socket.emit("resync_game_state", { roomId: gameState.roomId });
+}
+
+// Handle zone activated event
+function handleZoneActivated(data) {
+  console.log("Zone activated:", data);
+  UI.showNotification("A zone has been activated! You can now capture it.", "success");
+  
+  // Update game state with the latest data
+  Game.updateGameState(data.gameState);
+}
+
+// Handle runner won event
+function handleRunnerWon(data) {
+  console.log("Runner won:", data);
+  UI.showNotification(`${data.username} has reached their target and won!`, "success");
+  
+  // Request updated game state
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
 

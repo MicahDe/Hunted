@@ -21,6 +21,7 @@ const Game = {
   timers: {
     gameTimer: null,
     locationTimer: null,
+    zoneTimer: null,
   },
 
   // Initialize the game
@@ -44,19 +45,10 @@ const Game = {
       initialState.playRadius
     );
 
-    // Calculate time remaining
-    if (initialState.startTime && initialState.gameDuration) {
-      const now = Date.now();
-      const endTime = initialState.startTime + (initialState.gameDuration * 60 * 1000);
-      const timeRemaining = Math.max(0, Math.floor((endTime - now) / 1000));
-      this.gameState.timeRemaining = timeRemaining;
-    }
-
     // Initialize UI
     this.initGameUI();
 
-    // Start timers
-    this.startGameTimer();
+    // Start location timer
     this.startLocationTimer();
 
     // Initialize runner locations if available in the game state
@@ -69,6 +61,11 @@ const Game = {
     // Update targets on map
     console.log("Updating targets on map for team:", gameState.team);
     GameMap.updateTargets(initialState.targets, gameState.team);
+
+    // Update zone status display for runners
+    if (this.playerInfo && this.playerInfo.team === "runner" && initialState.targets) {
+      this.updateZoneStatusDisplay(initialState.targets);
+    }
   },
 
   // Initialize game UI
@@ -78,55 +75,10 @@ const Game = {
     // Set team display and controls
     UI.showTeamControls(this.playerInfo.team);
     
-    // Update time display
-    if (this.gameState.timeRemaining) {
-      UI.updateTimeDisplay(this.gameState.timeRemaining);
-    }
-    
     // Update player lists in menu
     if (this.gameState.players) {
       UI.updateGamePlayerLists(this.gameState.players);
     }
-
-    // Initialize player score display
-    if (this.playerInfo.team === "runner") {
-      // Find current player in players list to get score
-      const playerInfo = this.gameState.players?.find(
-        (p) => p.playerId === this.playerInfo.playerId
-      );
-      UI.updatePlayerScore(playerInfo ? playerInfo.score : 0);
-    } else {
-      // Hide score for hunters
-      UI.updatePlayerScore(0);
-    }
-  },
-
-  // Start game timer
-  startGameTimer: function () {
-    // Clear existing timer
-    if (this.timers.gameTimer) {
-      clearInterval(this.timers.gameTimer);
-    }
-
-    // Set current time
-    let timeRemaining = this.gameState.timeRemaining;
-
-    // Update UI
-    UI.updateTimeDisplay(timeRemaining);
-
-    // Start interval
-    this.timers.gameTimer = setInterval(() => {
-      // Decrement time
-      timeRemaining -= 1;
-
-      // Update UI
-      UI.updateTimeDisplay(timeRemaining);
-
-      // Check if game is over
-      if (timeRemaining <= 0) {
-        this.endGame("time");
-      }
-    }, 1000);
   },
 
   // Start location update timer
@@ -168,25 +120,6 @@ const Game = {
     // Store new state
     this.gameState = { ...state };
     
-    // If time remaining is not explicitly provided, calculate it
-    if (!this.gameState.timeRemaining && this.gameState.startTime && this.gameState.gameDuration) {
-      const now = Date.now();
-      const endTime = this.gameState.startTime + (this.gameState.gameDuration * 60 * 1000);
-      this.gameState.timeRemaining = Math.max(0, Math.floor((endTime - now) / 1000));
-    }
-
-    // Update target display for runners
-    if (this.playerInfo && this.playerInfo.team === "runner") {
-      
-      // Find current player in players list to get score
-      const playerInfo = state.players?.find(
-        (p) => p.playerId === this.playerInfo.playerId
-      );
-      if (playerInfo) {
-        UI.updatePlayerScore(playerInfo.score || 0);
-      }
-    }
-
     // Update player lists in menu
     if (state.players) {
       UI.updateGamePlayerLists(state.players);
@@ -195,6 +128,11 @@ const Game = {
     // Update targets on map (always call this to ensure targets are properly updated)
     if (this.playerInfo) {
       GameMap.updateTargets(state.targets, this.playerInfo.team);
+    }
+
+    // Update zone status display for runners
+    if (this.playerInfo && this.playerInfo.team === "runner" && state.targets) {
+      this.updateZoneStatusDisplay(state.targets);
     }
 
     // Check for caught runners
@@ -209,11 +147,6 @@ const Game = {
         GameMap.removeRunnerMarker(runner.playerId);
       });
     }
-    
-    // Update timer display
-    if (this.gameState.timeRemaining) {
-      UI.updateTimeDisplay(this.gameState.timeRemaining);
-    }
 
     // If we're in the lobby, also update the lobby player lists
     if (window.currentScreen === "lobby-screen") {
@@ -221,6 +154,95 @@ const Game = {
         updatePlayerLists(state.players);
       }
     }
+  },
+
+  // Update zone status display for runners
+  updateZoneStatusDisplay: function(targets) {
+    const zoneStatusElement = document.getElementById("zone-status-value");
+    if (!zoneStatusElement) return;
+    
+    // Find the runner's active target (should only be one)
+    const myTargets = targets.filter(target => 
+      target.playerId === this.playerInfo.playerId && 
+      target.status === 'active'
+    );
+    
+    if (myTargets.length === 0) {
+      zoneStatusElement.textContent = "No Zone";
+      zoneStatusElement.classList.remove("zone-active", "zone-inactive", "zone-countdown");
+      return;
+    }
+    
+    const target = myTargets[0];
+    
+    // If zone is inactive and has an activation time, show countdown
+    if (target.zoneStatus === 'inactive' && target.activationTime) {
+      const now = Date.now();
+      const timeRemaining = Math.max(0, Math.floor((target.activationTime - now) / 1000));
+      
+      if (timeRemaining > 0) {
+        // Format the time as MM:SS
+        const minutes = Math.floor(timeRemaining / 60);
+        const seconds = timeRemaining % 60;
+        const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        
+        zoneStatusElement.textContent = `Zone: ${formattedTime}`;
+        zoneStatusElement.classList.remove("zone-active");
+        zoneStatusElement.classList.add("zone-countdown");
+        
+        // Start a countdown timer if we don't have one yet
+        if (!this.timers.zoneTimer) {
+          this.startZoneCountdown(target);
+        }
+        return;
+      }
+    }
+    
+    // If zone is active or should be active now
+    if (target.zoneStatus === 'active' || (target.activationTime && Date.now() > target.activationTime)) {
+      zoneStatusElement.textContent = "Zone: Active";
+      zoneStatusElement.classList.remove("zone-inactive", "zone-countdown");
+      zoneStatusElement.classList.add("zone-active");
+    } else {
+      zoneStatusElement.textContent = "Zone: Inactive";
+      zoneStatusElement.classList.remove("zone-active", "zone-countdown");
+      zoneStatusElement.classList.add("zone-inactive");
+    }
+  },
+  
+  // Start zone countdown timer
+  startZoneCountdown: function(target) {
+    // Clear any existing timer
+    if (this.timers.zoneTimer) {
+      clearInterval(this.timers.zoneTimer);
+    }
+    
+    // Start a countdown timer
+    this.timers.zoneTimer = setInterval(() => {
+      const zoneStatusElement = document.getElementById("zone-status-value");
+      if (!zoneStatusElement) return;
+      
+      const now = Date.now();
+      const timeRemaining = Math.max(0, Math.floor((target.activationTime - now) / 1000));
+      
+      if (timeRemaining > 0) {
+        // Format the time as MM:SS
+        const minutes = Math.floor(timeRemaining / 60);
+        const seconds = timeRemaining % 60;
+        const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        
+        zoneStatusElement.textContent = `Zone: ${formattedTime}`;
+      } else {
+        // Zone is now active
+        zoneStatusElement.textContent = "Zone: Active";
+        zoneStatusElement.classList.remove("zone-inactive", "zone-countdown");
+        zoneStatusElement.classList.add("zone-active");
+        
+        // Clear the timer
+        clearInterval(this.timers.zoneTimer);
+        this.timers.zoneTimer = null;
+      }
+    }, 1000);
   },
 
   // Update team UI
@@ -255,18 +277,25 @@ const Game = {
   // End the game
   endGame: function (reason) {
     // Clear timers
-    clearInterval(this.timers.gameTimer);
-    clearInterval(this.timers.locationTimer);
+    if (this.timers.zoneTimer) {
+      clearInterval(this.timers.zoneTimer);
+      this.timers.zoneTimer = null;
+    }
+    
+    if (this.timers.locationTimer) {
+      clearInterval(this.timers.locationTimer);
+      this.timers.locationTimer = null;
+    }
 
     // Stop location tracking
     GameMap.stopLocationTracking();
 
     // Show appropriate game over message
     let gameOverMessage;
-    if (reason === "time") {
-      gameOverMessage = "Game Over! Time expired.";
-    } else if (reason === "caught") {
+    if (reason === "caught") {
       gameOverMessage = "Game Over! All Runners have been caught.";
+    } else if (reason === "runners_won") {
+      gameOverMessage = "Game Over! Runners have reached their targets.";
     } else {
       gameOverMessage = "Game Over!";
     }

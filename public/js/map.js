@@ -38,6 +38,7 @@ const GameMap = {
     runner: null,
     target: null,
     player: null,
+    selfLocation: null,
   },
 
   // Initialize maps
@@ -51,7 +52,7 @@ const GameMap = {
     // Player icon is customized based on current location
     this.icons.player = L.divIcon({
       className: "map-marker-player",
-      html: `<div class="map-marker-player-inner"></div>`,
+      html: `<img src="assets/icons/self-location.svg" alt="Self Location">`,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
     });
@@ -437,23 +438,23 @@ const GameMap = {
       }).addTo(this.gameMap);
 
       // Add accuracy circle
-      this.playerAccuracyCircle = L.circle([latitude, longitude], {
+      /*this.playerAccuracyCircle = L.circle([latitude, longitude], {
         radius: accuracy * 0.5,
         color: "#4cc9f0",
         fillColor: "#4cc9f0",
         fillOpacity: 0.2,
         weight: 1,
-      }).addTo(this.gameMap);
+      }).addTo(this.gameMap);*/
 
       // Center map on player
       this.gameMap.setView([latitude, longitude], 16);
     }
 
     // Update accuracy circle
-    if (this.playerAccuracyCircle) {
+    /*if (this.playerAccuracyCircle) {
       this.playerAccuracyCircle.setLatLng([latitude, longitude]);
       this.playerAccuracyCircle.setRadius(accuracy);
-    }
+    }*/
 
     // Emit location update to server
     Game.emitLocationUpdate(latitude, longitude);
@@ -794,17 +795,12 @@ const GameMap = {
           // Add popup
           const popupContent = `
                       <div class="map-player-popup">
-                          <strong>Target</strong><br>
-                          Points: ${target.pointsValue}
+                          <strong>Target</strong>
                       </div>
                   `;
           this.targetMarkers[target.targetId].bindPopup(popupContent);
         }
       }
-      
-      // For circle placement, we need to know all radius levels for this target
-      // In the real data, we only have the current level, but for visualization
-      // we'll generate all possible levels here for demo purposes
       
       // Check if target circle exists - if it does, we need to regenerate all circles
       // First, remove existing target circles for this target
@@ -829,41 +825,42 @@ const GameMap = {
         // In production, these should be retrieved from the server
         const radiusLevels = [125, 250, 500, 1000];
         
-        // Filter levels that are less than or equal to the current radius level
-        const activeRadiusLevels = radiusLevels.filter(r => r <= target.radiusLevel);
-        
-        // If no active levels (shouldn't happen), just use the current radius
-        if (activeRadiusLevels.length === 0) {
-          activeRadiusLevels.push(target.radiusLevel);
-        }
-        
         // Generate positions for nested circles
         const circlePositions = geoUtils.generateNestedCirclePositions(
           target.location.lat,
           target.location.lng,
-          activeRadiusLevels
+          radiusLevels
         );
+        
+        // Determine if the zone is active
+        const isActive = target.zoneStatus === 'active' || 
+                         (target.activationTime && Date.now() > target.activationTime);
         
         // Create each circle at its calculated position
         circlePositions.forEach((position, index) => {
-          const circleColor = '#ef7d54';
+          if (position.radius !== target.radiusLevel) {
+            return;
+          }
+
+          // Use different colors for active vs inactive zones
+          const circleColor = isActive ? '#4caf50' : '#ef7d54';
+          const fillOpacity = 0.3;
+          const dashArray = isActive ? null : "5, 5";
           
           // Create circle with the specified radius at the calculated position
           const circle = L.circle([position.lat, position.lng], {
             radius: position.radius,
             color: circleColor,
             fillColor: circleColor,
-            fillOpacity: 0.2,
+            fillOpacity: fillOpacity,
             weight: 2,
-            dashArray: "5, 5",
-            className: `map-circle-target map-circle-target-level-${position.radius}`,
+            dashArray: dashArray,
+            className: `map-circle-target map-circle-target-level-${position.radius} ${isActive ? 'active-zone' : 'inactive-zone'}`,
           });
           
           // Add the circle to the feature group
           this.targetCircles[target.targetId].addLayer(circle);
         });
-        
-        console.log("Created new nested target circles");
       }
     });
 
@@ -893,7 +890,6 @@ const GameMap = {
         }
 
         if (this.targetCircles[targetId]) {
-          // Remove the circle
           this.gameMap.removeLayer(this.targetCircles[targetId]);
           delete this.targetCircles[targetId];
           console.log("Removed obsolete target circle:", targetId);

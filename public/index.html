@@ -82,12 +82,12 @@
               />
             </div>
             <div class="form-group">
-              <label for="game-duration">Game Duration (minutes)</label>
+              <label for="zone-activation-delay">Zone Activation Delay (seconds)</label>
               <input
                 type="number"
-                id="game-duration"
+                id="zone-activation-delay"
                 min="10"
-                max="180"
+                max="300"
                 value="60"
                 required
               />
@@ -216,8 +216,8 @@
             <h3>Game Settings</h3>
             <div class="game-settings">
               <div class="setting-item">
-                <span class="setting-label">Duration:</span>
-                <span id="game-duration-display">60 min</span>
+                <span class="setting-label">Zone Activation Delay:</span>
+                <span id="zone-activation-delay-display">60 sec</span>
               </div>
               <div class="setting-item">
                 <span class="setting-label">Play Area:</span>
@@ -259,13 +259,8 @@
               </div>
             </div>
             <div class="status-time status-item">
-              <div id="time-remaining" class="time-indicator">
-                <span id="time-value">--:--</span>
-              </div>
-            </div>
-            <div class="status-score status-item" id="player-score-container">
-              <div id="player-score" class="score-indicator">
-                Score: <span id="score-value">0</span>
+              <div id="zone-status" class="time-indicator">
+                <span id="zone-status-value">No Zone</span>
               </div>
             </div>
           </div>
@@ -283,9 +278,6 @@
           <div id="runner-controls" class="team-controls">
             <button id="center-map-runner-btn" class="control-btn">
               <img src="assets/icons/location-ping.svg" alt="Center Map" />
-            </button>
-            <button id="request-target-btn" class="control-btn">
-              <img src="assets/icons/target.svg" alt="Request Target" />
             </button>
             <button id="caught-btn" class="danger-btn">I've Been Caught</button>
           </div>

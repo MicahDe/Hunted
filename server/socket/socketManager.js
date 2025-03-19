@@ -12,7 +12,7 @@ module.exports = function (io, db) {
     // Create a room
     socket.on("create_room", async (data) => {
       try {
-        const { roomName, username, team, gameDuration, playRadius, centralLat, centralLng } = data;
+        const { roomName, username, team, zoneActivationDelay, playRadius, centralLat, centralLng } = data;
         let roomId;
 
         // Create new room
@@ -20,7 +20,7 @@ module.exports = function (io, db) {
         await createRoom(
           roomId,
           roomName,
-          data.gameDuration,
+          data.zoneActivationDelay,
           data.centralLat,
           data.centralLng,
           data.playRadius
@@ -29,7 +29,7 @@ module.exports = function (io, db) {
         return socket.emit("room_created", {
           roomId,
           roomName,
-          gameDuration,
+          zoneActivationDelay,
           playRadius,
           centralLat,
           centralLng,
@@ -183,6 +183,44 @@ module.exports = function (io, db) {
         console.log("Updating room status to active for room:", roomId);
         await updateRoomStatus(roomId, "active");
 
+        // Generate targets for all runners in the room
+        const runners = await getTeamPlayers(roomId, "runner");
+        console.log(`Found ${runners.length} runners for initial target generation`);
+        
+        for (const runner of runners) {
+          // Skip runners with no location data
+          if (!runner.last_lat || !runner.last_lng) {
+            continue;
+          }
+          
+          // Generate a target for this runner
+          const target = await generateTargetForPlayer(
+            roomId,
+            runner.player_id,
+            runner.last_lat,
+            runner.last_lng
+          );
+          
+          if (target) {
+            console.log(`Generated initial target for runner ${runner.player_id}`);
+            
+            // Find the socket for this player
+            for (const [socketId, info] of connectedPlayers.entries()) {
+              if (info.playerId === runner.player_id) {
+                const playerSocket = io.sockets.sockets.get(socketId);
+                if (playerSocket) {
+                  // Notify player of their new target
+                  playerSocket.emit("new_target", {
+                    target,
+                    gameState: await getGameState(roomId, runner.player_id)
+                  });
+                  break;
+                }
+              }
+            }
+          }
+        }
+
         // Get updated game state
         const gameState = await getGameState(roomId);
         console.log(
@@ -267,20 +305,10 @@ module.exports = function (io, db) {
               io.to(roomId).emit("target_reached", {
                 targetId: targetResult.reachedTarget.targetId,
                 location: targetResult.reachedTarget.location,
-                pointsValue: targetResult.reachedTarget.pointsValue,
                 playerId,
                 username: playerData.username,
                 gameState: await getGameState(roomId),
               });
-              
-              // If a new target was also generated, notify just this player
-              if (targetResult.newTarget) {
-                console.log(`Sending new target ${targetResult.newTarget.targetId} to player ${playerId}`);
-                socket.emit("new_target", {
-                  target: targetResult.newTarget,
-                  gameState: await getGameState(roomId),
-                });
-              }
             }
             // Case 2: Player entered a larger radius, target updated with smaller radius
             else if (targetResult.updatedTarget) {
@@ -291,25 +319,36 @@ module.exports = function (io, db) {
                 targetId: targetResult.updatedTarget.targetId,
                 location: targetResult.updatedTarget.location,
                 radiusLevel: targetResult.updatedTarget.radiusLevel,
-                pointsValue: targetResult.updatedTarget.pointsValue,
-                earnedPoints: targetResult.updatedTarget.earnedPoints,
-                gameState: await getGameState(roomId),
+                zoneStatus: targetResult.updatedTarget.zoneStatus,
+                activationTime: targetResult.updatedTarget.activationTime,
+                gameState: await getGameState(roomId, playerId),
               });
             }
-            // Case 3: New target was generated for player
+            // Case 3: Zone was activated
+            else if (targetResult.zoneActivated) {
+              console.log(`Zone ${targetResult.zoneActivated.targetId} activated for player ${playerId}`);
+              
+              // Notify just this player about the zone activation
+              socket.emit("zone_activated", {
+                targetId: targetResult.zoneActivated.targetId,
+                location: targetResult.zoneActivated.location,
+                radiusLevel: targetResult.zoneActivated.radiusLevel,
+                gameState: await getGameState(roomId, playerId),
+              });
+            }
+            // Case 4: New target was generated for player
             else if (targetResult.isNew && targetResult.target) {
               console.log(`New target ${targetResult.target.targetId} generated for player ${playerId}`);
               
               // Notify just this player about the new target
               socket.emit("new_target", {
                 target: targetResult.target,
-                gameState: await getGameState(roomId),
+                gameState: await getGameState(roomId, playerId),
               });
             }
           }
           
-          // If player has no active targets and is far from other targets,
-          // generate a new one
+          // If player has no active targets, generate one
           else if (targetResult === null) {
             const activeTargets = await new Promise((resolve, reject) => {
               db.all(
@@ -333,7 +372,7 @@ module.exports = function (io, db) {
                 // Notify just this player about the new target
                 socket.emit("new_target", {
                   target: newTarget,
-                  gameState: await getGameState(roomId),
+                  gameState: await getGameState(roomId, playerId),
                 });
               }
             }
@@ -373,11 +412,11 @@ module.exports = function (io, db) {
           timestamp: Date.now(),
         });
 
-        // Check if all runners are caught
+        // Check if all runners are caught or have reached their target
         const activeRunners = await getTeamPlayers(roomId, "runner", "active");
 
         if (activeRunners.length === 0) {
-          // Game over - hunters win
+          // Game over - all runners have been caught or reached their target
           await updateRoomStatus(roomId, "completed");
 
           // Get final game state
@@ -385,7 +424,7 @@ module.exports = function (io, db) {
 
           // Notify all players
           io.to(roomId).emit("game_over", {
-            reason: "All runners caught",
+            reason: "All runners have been caught or reached their targets",
             gameState,
           });
         }
@@ -434,73 +473,6 @@ module.exports = function (io, db) {
       } catch (error) {
         console.error("Error getting game state:", error);
         socket.emit("error", { message: "Failed to get game state" });
-      }
-    });
-
-    // Handle target request
-    socket.on("request_target", async (data) => {
-      try {
-        const playerInfo = connectedPlayers.get(socket.id);
-        if (!playerInfo) {
-          return socket.emit("error", { message: "Player not found" });
-        }
-
-        const { roomId, playerId, team } = playerInfo;
-        
-        // Only runners can request targets
-        if (team !== "runner") {
-          return socket.emit("error", { message: "Only runners can request targets" });
-        }
-        
-        console.log(`Player ${playerId} is requesting a target`);
-        
-        // Check if player already has active targets
-        const activeTargets = await new Promise((resolve, reject) => {
-          db.all(
-            "SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active'",
-            [roomId, playerId],
-            (err, rows) => {
-              if (err) reject(err);
-              resolve(rows || []);
-            }
-          );
-        });
-        
-        // If player already has a target, just return the current game state
-        if (activeTargets.length > 0) {
-          console.log(`Player ${playerId} already has ${activeTargets.length} active targets`);
-          const gameState = await getGameState(roomId, playerId);
-          return socket.emit("game_state", gameState);
-        }
-        
-        // Get player's location for target generation
-        const player = await getPlayerById(playerId);
-        if (!player.last_lat || !player.last_lng) {
-          return socket.emit("error", { message: "No location data available. Move around to get a target." });
-        }
-        
-        // Generate a new target for the player
-        const newTarget = await generateTargetForPlayer(
-          roomId, 
-          playerId, 
-          player.last_lat, 
-          player.last_lng
-        );
-        
-        if (newTarget) {
-          console.log(`Generated new target for player ${playerId}:`, newTarget);
-          
-          // Send the new target to the player
-          socket.emit("new_target", {
-            target: newTarget,
-            gameState: await getGameState(roomId, playerId),
-          });
-        } else {
-          socket.emit("error", { message: "Failed to generate target" });
-        }
-      } catch (error) {
-        console.error("Error handling target request:", error);
-        socket.emit("error", { message: "Error processing target request" });
       }
     });
   });
@@ -566,18 +538,18 @@ module.exports = function (io, db) {
   async function createRoom(
     roomId,
     roomName,
-    gameDuration,
+    zoneActivationDelay,
     centralLat,
     centralLng,
     playRadius
   ) {
     return new Promise((resolve, reject) => {
       db.run(
-        "INSERT INTO rooms (room_id, room_name, game_duration, central_lat, central_lng, play_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO rooms (room_id, room_name, zone_activation_delay, central_lat, central_lng, play_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
           roomId,
           roomName,
-          gameDuration,
+          zoneActivationDelay,
           centralLat,
           centralLng,
           playRadius,
@@ -805,16 +777,33 @@ module.exports = function (io, db) {
       }
 
       // Get all targets for this room
-      const targets = await new Promise((resolve, reject) => {
-        db.all(
-          "SELECT * FROM targets WHERE room_id = ?",
-          [roomId],
-          (err, rows) => {
-            if (err) reject(err);
-            resolve(rows || []);
-          }
-        );
-      });
+      let targets;
+      
+      if (requestingPlayerId) {
+        // If a player ID is provided, only get their targets
+        targets = await new Promise((resolve, reject) => {
+          db.all(
+            "SELECT * FROM targets WHERE room_id = ? AND player_id = ?",
+            [roomId, requestingPlayerId],
+            (err, rows) => {
+              if (err) reject(err);
+              resolve(rows || []);
+            }
+          );
+        });
+      } else {
+        // Get all targets
+        targets = await new Promise((resolve, reject) => {
+          db.all(
+            "SELECT * FROM targets WHERE room_id = ?",
+            [roomId],
+            (err, rows) => {
+              if (err) reject(err);
+              resolve(rows || []);
+            }
+          );
+        });
+      }
 
       // Format targets for client
       const formattedTargets = targets.map((target) => ({
@@ -825,8 +814,9 @@ module.exports = function (io, db) {
           lng: target.lng,
         },
         radiusLevel: target.radius_level,
-        pointsValue: target.points_value,
         status: target.status,
+        zoneStatus: target.zone_status || 'inactive',
+        activationTime: target.activation_time,
         reachedBy: target.player_id,
         reachedAt: target.reached_at,
       }));
@@ -845,29 +835,11 @@ module.exports = function (io, db) {
         lastPingTime: player.last_ping_time,
       }));
 
-      // Calculate scores for all players
-      for (const player of formattedPlayers) {
-        // Get all target discoveries for this player
-        const discoveries = await new Promise((resolve, reject) => {
-          db.all(
-            "SELECT * FROM target_discoveries WHERE player_id = ?",
-            [player.playerId],
-            (err, rows) => {
-              if (err) reject(err);
-              resolve(rows || []);
-            }
-          );
-        });
-        
-        // Sum up points earned
-        player.score = discoveries.reduce((sum, discovery) => sum + discovery.points_earned, 0);
-      }
-
       // Construct game state
       const gameState = {
         roomId: room.room_id,
         roomName: room.room_name,
-        gameDuration: room.game_duration,
+        zoneActivationDelay: room.zone_activation_delay,
         playRadius: room.play_radius,
         centralLocation: {
           lat: room.central_lat,
@@ -936,8 +908,41 @@ module.exports = function (io, db) {
       
       console.log(`Target ${target.target_id}: isInTargetArea=${isInTargetArea}, current radius=${target.radius_level}m`);
 
-      // Check if player is within the target's area
-      if (isInTargetArea) {
+      // Check zone activation status
+      const currentTime = Date.now();
+      const isZoneActive = target.zone_status === 'active' || 
+                          (target.activation_time && currentTime > target.activation_time);
+      
+      console.log(`Zone status: ${target.zone_status}, active: ${isZoneActive}`);
+      
+      // If zone was inactive but should be active now, update it
+      if (target.zone_status === 'inactive' && currentTime > target.activation_time) {
+        await new Promise((resolve, reject) => {
+          db.run(
+            "UPDATE targets SET zone_status = 'active' WHERE target_id = ?",
+            [target.target_id],
+            function (err) {
+              if (err) reject(err);
+              resolve(this.changes);
+            }
+          );
+        });
+        
+        // Return the zone activation event
+        return {
+          zoneActivated: {
+            targetId: target.target_id,
+            location: {
+              lat: target.lat,
+              lng: target.lng,
+            },
+            radiusLevel: target.radius_level
+          }
+        };
+      }
+
+      // Check if player is within the target's area and zone is active
+      if (isInTargetArea && isZoneActive) {
         console.log(`Player is in range of target ${target.target_id} (current radius: ${target.radius_level}m)`);
         
         // If smallest radius (125m), mark as reached
@@ -956,20 +961,56 @@ module.exports = function (io, db) {
             );
           });
 
-          // Generate a new target for the player
-          const newTarget = await generateTargetForPlayer(roomId, playerId, lat, lng);
+          // Update player status to indicate they've won
+          await updatePlayerStatus(playerId, 'won');
           
-          // Return both the reached target and the new target
+          // Get player info
+          const player = await getPlayerById(playerId);
+
+          // Check if all runners have either been caught or reached their target
+          const activeRunners = await new Promise((resolve, reject) => {
+            db.all(
+              "SELECT * FROM players WHERE room_id = ? AND team = 'runner' AND status = 'active'",
+              [roomId],
+              (err, rows) => {
+                if (err) reject(err);
+                resolve(rows || []);
+              }
+            );
+          });
+          
+          // If no active runners left, game is over
+          if (activeRunners.length === 0) {
+            // Game over - update room status
+            await updateRoomStatus(roomId, "completed");
+            
+            // Get final game state
+            const gameState = await getGameState(roomId);
+            
+            // Notify all players of game completion
+            io.to(roomId).emit("game_over", {
+              reason: "All runners have either been caught or reached their targets",
+              gameState
+            });
+          } else {
+            // Just notify about this runner's victory
+            io.to(roomId).emit("runner_won", {
+              playerId,
+              username: player.username,
+              targetId: target.target_id,
+              timestamp: Date.now()
+            });
+          }
+
+          // Return the reached target
           return {
             reachedTarget: {
               targetId: target.target_id,
               location: {
                 lat: target.lat,
                 lng: target.lng,
-              },
-              pointsValue: target.points_value,
-            },
-            newTarget: newTarget
+              }
+            }
           };
         }
         // If larger radius, create smaller radius target (narrowing the search)
@@ -989,50 +1030,21 @@ module.exports = function (io, db) {
           const newRadiusLevel = config.game.targetRadiusLevels[currentRadiusIndex + 1];
           console.log(`New radius level: ${newRadiusLevel}m (was ${target.radius_level}m)`);
           
-          // Award points to the player for discovering this radius level
-          // Points awarded equal to the current radius level
-          const earnedPoints = target.points_value;
-          console.log(`Player ${playerId} awarded ${earnedPoints} points for discovering ${target.radius_level}m radius level`);
-          
-          // Calculate new points for next radius level
-          const newPointsValue = target.points_value + config.game.additionalPointsPerCircle;
-          
-          // Get the player to find their team
-          const player = await getPlayerById(playerId);
-          if (!player) {
-            console.error(`Player ${playerId} not found when awarding points`);
-            return null;
-          }
-          
-          // Only runners should get points
-          if (player.team === "runner") {
-            // Record that points were awarded for this target discovery
-            // Store in the database that this player discovered this target at this radius level
-            await new Promise((resolve, reject) => {
-              db.run(
-                `INSERT INTO target_discoveries 
-                (player_id, target_id, radius_level, points_earned, discovery_time)
-                VALUES (?, ?, ?, ?, ?)`,
-                [playerId, target.target_id, target.radius_level, earnedPoints, Date.now()],
-                function(err) {
-                  if (err) {
-                    console.error("Error recording target discovery:", err);
-                    reject(err);
-                  }
-                  resolve(this.lastID);
-                }
-              );
-            }).catch(err => {
-              console.error("Failed to record target discovery:", err);
-              // Continue even if recording fails - don't block the player
+          // Calculate activation time for the new zone
+          const room = await new Promise((resolve, reject) => {
+            db.get("SELECT * FROM rooms WHERE room_id = ?", [roomId], (err, row) => {
+              if (err) reject(err);
+              resolve(row);
             });
-          }
+          });
           
-          // Update target with smaller radius and more points
+          const activationTime = Date.now() + (room.zone_activation_delay * 1000);
+          
+          // Update target with smaller radius and inactive status
           await new Promise((resolve, reject) => {
             db.run(
-              "UPDATE targets SET radius_level = ?, points_value = ? WHERE target_id = ?",
-              [newRadiusLevel, newPointsValue, target.target_id],
+              "UPDATE targets SET radius_level = ?, zone_status = 'inactive', activation_time = ? WHERE target_id = ?",
+              [newRadiusLevel, activationTime, target.target_id],
               function (err) {
                 if (err) reject(err);
                 resolve(this.changes);
@@ -1049,23 +1061,11 @@ module.exports = function (io, db) {
                 lng: target.lng,
               },
               radiusLevel: newRadiusLevel,
-              pointsValue: newPointsValue,
-              earnedPoints: earnedPoints,
+              zoneStatus: 'inactive',
+              activationTime: activationTime
             }
           };
         }
-      }
-    }
-
-    // If no targets were reached but player has no active targets,
-    // generate a new one
-    if (targets.length === 0) {
-      const newTarget = await generateTargetForPlayer(roomId, playerId, lat, lng);
-      if (newTarget) {
-        return {
-          isNew: true,
-          target: newTarget
-        };
       }
     }
 
@@ -1087,19 +1087,11 @@ module.exports = function (io, db) {
       console.error(`Room ${roomId} not found when generating target`);
       return null;
     }
-    
-    // Calculate distance from center to determine if player is near boundary
-    const distanceFromCenter = geoUtils.calculateDistance(
-      playerLat, 
-      playerLng, 
-      room.central_lat, 
-      room.central_lng
-    );
-    
+
     // Check if there are already active targets for this player
     const existingTargets = await new Promise((resolve, reject) => {
       db.all(
-        "SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active'",
+        "SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status != 'reached'",
         [roomId, playerId],
         (err, rows) => {
           if (err) reject(err);
@@ -1108,104 +1100,44 @@ module.exports = function (io, db) {
       );
     });
     
-    // If player already has active targets, don't generate more
+    // If player already has a target, don't generate more
     if (existingTargets.length > 0) {
-      console.log(`Player ${playerId} already has ${existingTargets.length} active targets`);
+      console.log(`Player ${playerId} already has a target`);
       return existingTargets[0];
     }
     
     // Generate a new target position - biased away from player and toward center
     // if player is near boundary
-    let targetLat, targetLng, radius;
+    let targetLat, targetLng;
     
     // Maximum play area radius in meters
     const maxRadius = room.play_radius || config.game.defaultPlayAreaRadius;
     
-    // If player is within 25% of boundary, try to generate targets toward center
-    const isBiasTowardCenter = distanceFromCenter > (maxRadius * 0.75);
+    // Generate a random position within the play area
+    const angle = Math.random() * 360; // 0-360 degrees
+    const distance = Math.random() * maxRadius; // 0-maxRadius
     
-    if (isBiasTowardCenter) {
-      console.log(`Player is near boundary, biasing target toward center`);
-      // Generate position between player and center
-      const bearing = geoUtils.calculateBearing(
-        playerLat, 
-        playerLng, 
-        room.central_lat, 
-        room.central_lng
-      ) - 45 + Math.random() * 90;
-      
-      // Calculate a random distance (1000m to 1500m) from player toward center
-      const distance = Math.random() * 500 + 1000;
-      const targetPos = geoUtils.calculateDestination(
-        playerLat, 
-        playerLng, 
-        bearing, 
-        distance
-      );
-      
-      targetLat = targetPos.lat;
-      targetLng = targetPos.lng;
-    } else {
-      // Generate a random position within 1500m of player
-      // but at least 1000m away
-      const minDistance = 1000;
-      const maxDistance = 1500;
-      const angle = Math.random() * 360; // 0-360 degrees
-      const distance = minDistance + Math.random() * (maxDistance - minDistance);
-      
-      const targetPos = geoUtils.calculateDestination(
-        playerLat, 
-        playerLng, 
-        angle, 
-        distance
-      );
-      
-      targetLat = targetPos.lat;
-      targetLng = targetPos.lng;
-    }
-    
-    // Check if the target is within the play area
-    const distanceTargetFromCenter = geoUtils.calculateDistance(
-      targetLat, 
-      targetLng, 
+    const targetPos = geoUtils.calculateDestination(
       room.central_lat, 
-      room.central_lng
+      room.central_lng,
+      angle, 
+      distance
     );
     
-    // If target is outside play area, adjust it
-    if (distanceTargetFromCenter > maxRadius) {
-      console.log(`Target would be outside play area, adjusting`);
-      // Calculate bearing from center to target
-      const bearingFromCenter = geoUtils.calculateBearing(
-        room.central_lat, 
-        room.central_lng, 
-        targetLat, 
-        targetLng
-      );
-      
-      // Place target at boundary minus 100m for safety
-      const adjustedTargetPos = geoUtils.calculateDestination(
-        room.central_lat, 
-        room.central_lng, 
-        bearingFromCenter, 
-        maxRadius - 100
-      );
-      
-      targetLat = adjustedTargetPos.lat;
-      targetLng = adjustedTargetPos.lng;
-    }
+    targetLat = targetPos.lat;
+    targetLng = targetPos.lng;
     
     // Create target with initial radius
     const targetId = uuidv4();
     const initialRadius = config.game.targetRadiusLevels[0]; // Largest radius
-    const pointsValue = config.game.baseTargetPoints;
+    const activationTime = Date.now() + (room.zone_activation_delay * 1000); // Convert to milliseconds
     
     await new Promise((resolve, reject) => {
       db.run(
         `INSERT INTO targets 
-        (target_id, room_id, player_id, lat, lng, radius_level, points_value, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`,
-        [targetId, roomId, playerId, targetLat, targetLng, initialRadius, pointsValue],
+        (target_id, room_id, player_id, lat, lng, radius_level, status, zone_status, activation_time)
+        VALUES (?, ?, ?, ?, ?, ?, 'active', 'inactive', ?)`,
+        [targetId, roomId, playerId, targetLat, targetLng, initialRadius, activationTime],
         function (err) {
           if (err) reject(err);
           resolve(this.lastID);
@@ -1223,7 +1155,8 @@ module.exports = function (io, db) {
         lng: targetLng,
       },
       radiusLevel: initialRadius,
-      pointsValue
+      zoneStatus: 'inactive',
+      activationTime: activationTime
     };
   }
 };

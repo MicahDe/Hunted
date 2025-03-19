@@ -64,7 +64,7 @@ const UI = {
 
     // Reset form fields
     document.getElementById("room-name").value = "";
-    document.getElementById("game-duration").value = 60;
+    document.getElementById("zone-activation-delay").value = 60;
 
     // Reset team selection
     const teamBtns = document.querySelectorAll("#create-room-form .team-btn");
@@ -170,24 +170,6 @@ const UI = {
     }
   },
 
-  // Update player score display
-  updatePlayerScore: function (score) {
-    const scoreElement = document.getElementById("score-value");
-    const scoreContainer = document.getElementById("player-score-container");
-    
-    if (!scoreElement || !scoreContainer) return;
-    
-    // Update score value
-    scoreElement.textContent = score || 0;
-    
-    // Show/hide score based on if player is a runner
-    if (gameState.team === "runner") {
-      scoreContainer.style.display = "block";
-    } else {
-      scoreContainer.style.display = "none";
-    }
-  },
-
   // Update player lists in game menu
   updateGamePlayerLists: function (players) {
     if (!players) return;
@@ -229,7 +211,9 @@ const UI = {
                 ${
                   runner.status === "caught"
                     ? '<span class="player-status caught">Caught</span>'
-                    : `<span class="player-status score">${runner.score || 0}</span>`
+                    : runner.status === "won"
+                    ? '<span class="player-status won">Won</span>'
+                    : ""
                 }
             `;
       runnerList.appendChild(listItem);
