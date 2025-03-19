@@ -145,7 +145,6 @@ function setupSocketConnection() {
       "Disconnected from server. Trying to reconnect...",
       "error"
     );
-    socket.socket.connect()
     socket.emit("resync_game_state", { roomId: gameState.roomId });
   });
 
