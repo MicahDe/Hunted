@@ -354,6 +354,14 @@ p {
   margin-bottom: var(--spacing-4);
 }
 
+/* Center form submit buttons */
+#create-room-form .primary-btn,
+#join-room-form .primary-btn {
+  display: block;
+  margin: 0 auto;
+  min-width: 200px;
+}
+
 label {
   display: block;
   margin-bottom: var(--spacing-2);

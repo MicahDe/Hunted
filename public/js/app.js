@@ -136,16 +136,26 @@ function setupSocketConnection() {
   // Connection events
   socket.on("connect", () => {
     console.log("Connected to server");
+    localStorage.removeItem("reloadAttempts");
   });
 
-  socket.on("disconnect", () => {
-    console.log("Disconnected from server");
-    UI.hideLoading();
-    UI.showNotification(
-      "Disconnected from server. Trying to reconnect...",
-      "error"
-    );
-    socket.emit("resync_game_state", { roomId: gameState.roomId });
+  socket.on("disconnect", (reason) => {
+
+    const reloadAttempts = parseInt(localStorage.getItem("reloadAttempts")) || 0;
+
+    if (reloadAttempts < 3) {
+      UI.showLoading("Attempting to reconnect...");
+      localStorage.setItem("reloadAttempts", (reloadAttempts + 1).toString());
+      window.location.reload();
+    } else {
+      console.log("Disconnected from server", reason);
+      UI.hideLoading();
+      UI.showNotification(
+        "Disconnected from server. Please refresh the page.",
+        "error"
+      );
+      localStorage.removeItem("reloadAttempts");
+    }
   });
 
   socket.on("connect_error", (error) => {
