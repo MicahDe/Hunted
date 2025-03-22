@@ -616,6 +616,7 @@ const GameMap = {
     this.runnerHistoryLines = this.runnerHistoryLines || {};
     this.runnerHistoryMarkers[playerId] = [];
     
+    // Location history is limited to 20 points from the server
     // Create all points including current location
     const allPoints = [...locationHistory, { lat: currentLat, lng: currentLng, timestamp: currentTimestamp }];
     

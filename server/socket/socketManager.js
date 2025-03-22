@@ -692,11 +692,12 @@ module.exports = function (io, db) {
     
     return new Promise((resolve, reject) => {
       db.all(
-        "SELECT lat, lng, timestamp FROM location_history WHERE player_id = ? AND timestamp > ? ORDER BY timestamp ASC",
+        "SELECT lat, lng, timestamp FROM location_history WHERE player_id = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT 20",
         [playerId, thirtyMinutesAgo],
         function (err, rows) {
           if (err) reject(err);
-          resolve(rows || []);
+          // Reverse to get chronological order after using DESC with LIMIT
+          resolve((rows || []).reverse());
         }
       );
     });
