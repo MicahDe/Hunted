@@ -758,65 +758,34 @@ const GameMap = {
     console.log("Updating targets for player team:", playerTeam);
     console.log("Available targets:", targets);
 
-    // Keep track of existing targets
-    const existingTargetIds = Object.keys(this.targetMarkers);
-    const updatedTargetIds = [];
+    // Clear all existing target markers and circles first
+    Object.keys(this.targetMarkers).forEach((targetId) => {
+      if (this.targetMarkers[targetId]) {
+        this.gameMap.removeLayer(this.targetMarkers[targetId]);
+        delete this.targetMarkers[targetId];
+      }
+    });
+    
+    Object.keys(this.targetCircles).forEach((targetId) => {
+      if (this.targetCircles[targetId]) {
+        this.gameMap.removeLayer(this.targetCircles[targetId]);
+        delete this.targetCircles[targetId];
+      }
+    });
 
-    // Process each target - filter out reached targets first
-    targets.filter(target => target.status !== 'reached').forEach((target) => {
-      // Add to updated list
-      updatedTargetIds.push(target.targetId);
-      
+    // Only process targets for current player and with active status
+    const myActiveTargets = targets.filter(target => 
+      target.playerId === gameState.playerId && 
+      target.status !== 'reached'
+    );
+    
+    console.log(`Found ${myActiveTargets.length} active targets for current player`);
+
+    // For runners, we should only have at most one active target
+    if (myActiveTargets.length > 0) {
+      // If somehow there are multiple targets, just use the first one
+      const target = myActiveTargets[0];
       console.log("Processing target:", target);
-
-      // Skip targets that are owned by other players
-      if (target.playerId !== gameState.playerId) {
-        console.log("Target owned by another player");
-        return;
-      }
-
-      // Check if target marker exists
-      /*if (this.targetMarkers[target.targetId]) {
-        // Update marker position
-        this.targetMarkers[target.targetId].setLatLng([
-          target.location.lat,
-          target.location.lng,
-        ]);
-        console.log("Updated existing target marker");
-      } else {
-        // Only create marker for runner
-        if (playerTeam === "runner") {
-          // Create new marker
-          this.targetMarkers[target.targetId] = L.marker(
-            [target.location.lat, target.location.lng],
-            {
-              icon: this.icons.target,
-            }
-          ).addTo(this.gameMap);
-          console.log("Created new target marker");
-
-          // Add popup
-          const popupContent = `
-                      <div class="map-player-popup">
-                          <strong>Target</strong>
-                      </div>
-                  `;
-          this.targetMarkers[target.targetId].bindPopup(popupContent);
-        }
-      }*/
-      
-      // Check if target circle exists - if it does, we need to regenerate all circles
-      // First, remove existing target circles for this target
-      if (this.targetCircles[target.targetId]) {
-        // If it's a feature group (nested circles), remove all layers
-        if (this.targetCircles[target.targetId].getLayers) {
-          this.gameMap.removeLayer(this.targetCircles[target.targetId]);
-        } else {
-          // If it's a single circle, remove it
-          this.gameMap.removeLayer(this.targetCircles[target.targetId]);
-        }
-        delete this.targetCircles[target.targetId];
-      }
       
       // Only create circles for runner
       if (playerTeam === "runner") {
@@ -863,40 +832,7 @@ const GameMap = {
           this.targetCircles[target.targetId].addLayer(circle);
         });
       }
-    });
-
-    // Also explicitly cleanup any markers for reached targets
-    targets.filter(target => target.status === 'reached').forEach(target => {
-      if (this.targetMarkers[target.targetId]) {
-        this.gameMap.removeLayer(this.targetMarkers[target.targetId]);
-        delete this.targetMarkers[target.targetId];
-        console.log("Removed reached target marker:", target.targetId);
-      }
-      
-      if (this.targetCircles[target.targetId]) {
-        this.gameMap.removeLayer(this.targetCircles[target.targetId]);
-        delete this.targetCircles[target.targetId];
-        console.log("Removed reached target circle:", target.targetId);
-      }
-    });
-
-    // Remove targets that are no longer active or in the list
-    existingTargetIds.forEach((targetId) => {
-      if (!updatedTargetIds.includes(targetId)) {
-        // Remove marker and circle
-        if (this.targetMarkers[targetId]) {
-          this.gameMap.removeLayer(this.targetMarkers[targetId]);
-          delete this.targetMarkers[targetId];
-          console.log("Removed obsolete target marker:", targetId);
-        }
-
-        if (this.targetCircles[targetId]) {
-          this.gameMap.removeLayer(this.targetCircles[targetId]);
-          delete this.targetCircles[targetId];
-          console.log("Removed obsolete target circle:", targetId);
-        }
-      }
-    });
+    }
   },
 
   // Remove a runner marker

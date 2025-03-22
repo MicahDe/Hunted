@@ -161,11 +161,10 @@ const Game = {
     const zoneStatusElement = document.getElementById("zone-status-value");
     if (!zoneStatusElement) return;
 
-
     const zoneEnclosingElement = document.getElementById("zone-status-container");
     zoneEnclosingElement.style.display = "block";
     
-    // Find the runner's active target (should only be one)
+    // Find the runner's active targets (filter by player ID and active status)
     const myTargets = targets.filter(target => 
       target.playerId === this.playerInfo.playerId && 
       target.status === 'active'
@@ -177,6 +176,7 @@ const Game = {
       return;
     }
     
+    // Even if somehow there are multiple targets, just use the first one
     const target = myTargets[0];
     
     // If zone is inactive and has an activation time, show countdown

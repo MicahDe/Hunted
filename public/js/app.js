@@ -34,7 +34,9 @@ function setupAllEventListeners() {
   // Back buttons
   document.querySelectorAll(".back-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      UI.showScreen("splash-screen");
+      UI.showScreen("splash-screen");cccccbrfjbgkrhehdfckieutbvnfeniedlbhbircblgk
+      uekg
+      
     });
   });
 
