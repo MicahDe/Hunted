@@ -96,10 +96,6 @@ function setupAllEventListeners() {
     });
 
   document
-    .getElementById("caught-btn")
-    .addEventListener("click", reportSelfCaught);
-
-  document
     .getElementById("leave-game-btn")
     .addEventListener("click", leaveGame);
 
