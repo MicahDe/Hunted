@@ -33,7 +33,8 @@ Thumbs.db
 
 # IDE and editors
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 *.swp
 *.swo
 *.swn
