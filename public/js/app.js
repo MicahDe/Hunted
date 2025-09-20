@@ -96,6 +96,10 @@ function setupAllEventListeners() {
     .addEventListener("click", () => {
       GameMap.centerOnPlayer();
     });
+  
+  document
+    .getElementById("caught-btn")
+    .addEventListener("click", reportSelfCaught);
 
   document
     .getElementById("leave-game-btn")

@@ -413,7 +413,7 @@ module.exports = function (io, db) {
         });
 
         // Check if all runners are caught or have reached their target
-        const activeRunners = await getTeamPlayers(roomId, "runner", "active");
+        const activeRunners = await getTeamPlayers(roomId, "runner");
 
         if (activeRunners.length === 0) {
           // Game over - all runners have been caught or reached their target
@@ -439,9 +439,6 @@ module.exports = function (io, db) {
 
       if (playerInfo) {
         const { roomId, playerId } = playerInfo;
-
-        // Update player status to inactive
-        await updatePlayerStatus(playerId, "inactive");
 
         // Remove from connected players
         connectedPlayers.delete(socket.id);
@@ -971,7 +968,7 @@ module.exports = function (io, db) {
           // Check if all runners have either been caught or reached their target
           const activeRunners = await new Promise((resolve, reject) => {
             db.all(
-              "SELECT * FROM players WHERE room_id = ? AND team = 'runner' AND status = 'active'",
+              "SELECT * FROM players WHERE room_id = ? AND team = 'runner'",
               [roomId],
               (err, rows) => {
                 if (err) reject(err);
