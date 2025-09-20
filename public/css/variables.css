@@ -107,8 +107,8 @@
   --z-index-tooltip: 500;
 
   /* Game-specific */
-  --hunter-color-bg: rgba(229, 56, 59, 0.15);
-  --runner-color-bg: rgba(0, 119, 182, 0.15);
+  --hunter-color-bg: rgb(208, 25, 28); /* rgba(179, 0, 0, 0.2) */
+  --runner-color-bg: rgba(8, 156, 236); /* rgba(0, 68, 102, 0.2) */
 
   --map-height-mobile: calc(100vh - 140px);
   --map-height-desktop: calc(100vh - 160px);

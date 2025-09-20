@@ -421,8 +421,12 @@ textarea:focus {
 }
 
 .team-btn.selected {
-  border-color: currentColor;
-  box-shadow: 0 0 0 2px rgba(42, 57, 144, 0.2);
+  /* border-color:  */
+  /* box-shadow: 0 0 0 2px rgba(42, 57, 144, 0.2); */
+  color: white;
+}
+.team-btn.selected img {
+  filter: brightness(0) invert(1);
 }
 
 .hunter-team {
@@ -1188,20 +1192,6 @@ textarea:focus {
 .player-score-item.runner {
   color: var(--color-runner);
   border-color: var(--color-runner);
-}
-
-.hunter-team, 
-.runner-team {
-  background-color: transparent;
-  border: 1px solid currentColor;
-}
-
-.hunter-team.selected {
-  background-color: rgba(179, 0, 0, 0.2);
-}
-
-.runner-team.selected {
-  background-color: rgba(0, 68, 102, 0.2);
 }
 
 /* Add styles for active/inactive zones */
