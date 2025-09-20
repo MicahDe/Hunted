@@ -34,19 +34,16 @@ function setupAllEventListeners() {
   // Back buttons
   document.querySelectorAll(".back-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      UI.showScreen("splash-screen");cccccbrfjbgkrhehdfckieutbvnfeniedlbhbircblgk
-      uekg
-      
+      UI.showScreen("splash-screen");
+      uekg;
     });
   });
 
   // Create room form
-  document
-    .getElementById("create-room-form")
-    .addEventListener("submit", (e) => {
-      e.preventDefault();
-      createRoom();
-    });
+  document.getElementById("create-room-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    createRoom();
+  });
 
   // Join room form
   document.getElementById("join-room-form").addEventListener("submit", (e) => {
@@ -65,18 +62,10 @@ function setupAllEventListeners() {
   });
 
   // Lobby controls
-  document
-    .getElementById("start-game-btn")
-    .addEventListener("click", startGame);
-  document
-    .getElementById("leave-lobby-btn")
-    .addEventListener("click", leaveLobby);
-  document
-    .getElementById("delete-lobby-btn")
-    .addEventListener("click", deleteLobby);
-  document
-    .getElementById("return-game-btn")
-    .addEventListener("click", returnToActiveGame);
+  document.getElementById("start-game-btn").addEventListener("click", startGame);
+  document.getElementById("leave-lobby-btn").addEventListener("click", leaveLobby);
+  document.getElementById("delete-lobby-btn").addEventListener("click", deleteLobby);
+  document.getElementById("return-game-btn").addEventListener("click", returnToActiveGame);
 
   // Game controls
   document.getElementById("menu-btn").addEventListener("click", () => {
@@ -91,43 +80,27 @@ function setupAllEventListeners() {
     GameMap.centerOnPlayer();
   });
 
-  document
-    .getElementById("center-map-runner-btn")
-    .addEventListener("click", () => {
-      GameMap.centerOnPlayer();
-    });
-  
-  document
-    .getElementById("caught-btn")
-    .addEventListener("click", reportSelfCaught);
+  document.getElementById("center-map-runner-btn").addEventListener("click", () => {
+    GameMap.centerOnPlayer();
+  });
 
-  document
-    .getElementById("leave-game-btn")
-    .addEventListener("click", leaveGame);
+  document.getElementById("caught-btn").addEventListener("click", reportSelfCaught);
+
+  document.getElementById("leave-game-btn").addEventListener("click", leaveGame);
 
   // Game over screen
-  document
-    .getElementById("new-game-btn")
-    .addEventListener("click", setupNewGame);
-  document
-    .getElementById("return-home-btn")
-    .addEventListener("click", returnToHome);
+  document.getElementById("new-game-btn").addEventListener("click", setupNewGame);
+  document.getElementById("return-home-btn").addEventListener("click", returnToHome);
 
   // Handle geolocation permissions
   if ("geolocation" in navigator) {
     navigator.permissions.query({ name: "geolocation" }).then((result) => {
       if (result.state === "denied") {
-        UI.showNotification(
-          "Location permission is required for this game.",
-          "error"
-        );
+        UI.showNotification("Location permission is required for this game.", "error");
       }
     });
   } else {
-    UI.showNotification(
-      "Geolocation is not supported by your browser.",
-      "error"
-    );
+    UI.showNotification("Geolocation is not supported by your browser.", "error");
   }
 }
 
@@ -142,7 +115,6 @@ function setupSocketConnection() {
   });
 
   socket.on("disconnect", (reason) => {
-
     const reloadAttempts = parseInt(localStorage.getItem("reloadAttempts")) || 0;
 
     if (reloadAttempts < 3) {
@@ -152,10 +124,7 @@ function setupSocketConnection() {
     } else {
       console.log("Disconnected from server", reason);
       UI.hideLoading();
-      UI.showNotification(
-        "Disconnected from server. Please refresh the page.",
-        "error"
-      );
+      UI.showNotification("Disconnected from server. Please refresh the page.", "error");
       localStorage.removeItem("reloadAttempts");
     }
   });
@@ -163,10 +132,7 @@ function setupSocketConnection() {
   socket.on("connect_error", (error) => {
     console.error("Connection error:", error);
     UI.hideLoading();
-    UI.showNotification(
-      "Connection error. Please check your internet connection.",
-      "error"
-    );
+    UI.showNotification("Connection error. Please check your internet connection.", "error");
   });
 
   socket.on("error", (data) => {
@@ -215,7 +181,7 @@ function checkForExistingSession() {
           username: session.username,
           team: session.team,
         });
-        
+
         // If the game was active before reload, request the game state
         // The handleGameState function will redirect to the game screen if needed
         if (session.gameStatus === "active") {
@@ -236,9 +202,7 @@ function createRoom() {
   const username = document.getElementById("creator-username").value.trim();
   const zoneActivationDelay = parseInt(document.getElementById("zone-activation-delay").value);
   const playRadius = parseInt(document.getElementById("play-radius").value);
-  const teamBtn = document.querySelector(
-    "#create-room-form .team-btn.selected"
-  );
+  const teamBtn = document.querySelector("#create-room-form .team-btn.selected");
 
   if (!roomName || !username) {
     return UI.showNotification("Room name and username are required", "error");
@@ -254,10 +218,7 @@ function createRoom() {
   const location = GameMap.getSelectedLocation();
 
   if (!location) {
-    return UI.showNotification(
-      "Please select a starting location on the map",
-      "error"
-    );
+    return UI.showNotification("Please select a starting location on the map", "error");
   }
 
   // Log the selected location for debugging
@@ -273,7 +234,7 @@ function createRoom() {
   UI.showLoading("Creating room...");
 
   // Emit socket event to create room
-  socket.emit("create_room",{
+  socket.emit("create_room", {
     roomName,
     username,
     team,
@@ -347,10 +308,7 @@ function handleJoinSuccess(data) {
 
   // Update lobby UI with the provided game state
   if (data.gameState && data.gameState.centralLocation) {
-    console.log(
-      "Central location from join success:",
-      data.gameState.centralLocation
-    );
+    console.log("Central location from join success:", data.gameState.centralLocation);
     // Store central location for reference
     gameState.centralLocation = data.gameState.centralLocation;
   }
@@ -358,10 +316,8 @@ function handleJoinSuccess(data) {
   updateLobbyUI(data.gameState);
 
   // Show/hide host-only controls based on whether user is room creator
-  document.getElementById("start-game-btn").style.display =
-    gameState.isRoomCreator ? "block" : "none";
-  document.getElementById("delete-lobby-btn").style.display =
-    gameState.isRoomCreator ? "block" : "none";
+  document.getElementById("start-game-btn").style.display = gameState.isRoomCreator ? "block" : "none";
+  document.getElementById("delete-lobby-btn").style.display = gameState.isRoomCreator ? "block" : "none";
 }
 
 // Update lobby UI with current game state
@@ -413,11 +369,11 @@ function updateLobbyUI(state) {
       runnerMessage.style.display = "block";
     }
   }
-  
+
   // Show/hide buttons based on game status
   const startGameBtn = document.getElementById("start-game-btn");
   const returnGameBtn = document.getElementById("return-game-btn");
-  
+
   if (state.status === "active") {
     startGameBtn.style.display = "none";
     returnGameBtn.style.display = "block";
@@ -537,14 +493,14 @@ function handleNewTarget(data) {
 // Handle target radius update event
 function handleTargetRadiusUpdate(data) {
   console.log("Target radius updated:", data);
-  
+
   // Display the points earned notification if points were earned
   if (data.pointsValue && data.earnedPoints) {
     UI.showNotification(`You earned ${data.earnedPoints} points! Target is getting smaller!`, "success");
   } else {
     UI.showNotification("Zone captured! New zone has been revealed...", "info");
   }
-  
+
   // Update game state
   Game.updateGameState(data.gameState);
 }
@@ -574,28 +530,24 @@ function updateGameOverUI(data) {
   const state = data.gameState;
 
   // Set game stats
-  document.getElementById(
-    "final-duration"
-  ).textContent = `${state.gameDuration} min`;
+  document.getElementById("final-duration").textContent = `${state.gameDuration} min`;
 
   // Count reached targets
   const targetsReached = state.targets.filter((t) => t.reachedBy).length;
   document.getElementById("targets-reached").textContent = targetsReached;
 
   // Count caught runners
-  const runnersCaught = state.players.filter(
-    (p) => p.team === "runner" && p.status === "caught"
-  ).length;
+  const runnersCaught = state.players.filter((p) => p.team === "runner" && p.status === "caught").length;
   document.getElementById("runners-caught").textContent = runnersCaught;
-  
+
   // Populate all player scores
   const allPlayerScoresList = document.getElementById("all-player-scores-list");
   if (allPlayerScoresList) {
     allPlayerScoresList.innerHTML = "";
-    
+
     // Sort all players by score (highest first)
     const allPlayers = [...state.players].sort((a, b) => (b.score || 0) - (a.score || 0));
-    
+
     if (allPlayers.length === 0) {
       // No players in the game (shouldn't happen)
       const noPlayers = document.createElement("div");
@@ -603,30 +555,30 @@ function updateGameOverUI(data) {
       allPlayerScoresList.appendChild(noPlayers);
     } else {
       // Add each player's score
-      allPlayers.forEach(player => {
+      allPlayers.forEach((player) => {
         const scoreItem = document.createElement("div");
         scoreItem.className = `player-score-item ${player.team}`;
-        
+
         // Left side: player name and team
         const playerInfo = document.createElement("div");
         playerInfo.className = "player-info";
-        
+
         const playerName = document.createElement("span");
         playerName.className = "player-name";
         playerName.textContent = player.username;
-        
+
         const playerTeam = document.createElement("span");
         playerTeam.className = "player-team";
         playerTeam.textContent = `(${player.team})`;
-        
+
         playerInfo.appendChild(playerName);
         playerInfo.appendChild(playerTeam);
-        
+
         // Right side: player score
         const playerScore = document.createElement("span");
         playerScore.className = "player-score";
         playerScore.textContent = player.score || 0;
-        
+
         scoreItem.appendChild(playerInfo);
         scoreItem.appendChild(playerScore);
         allPlayerScoresList.appendChild(scoreItem);
@@ -639,10 +591,7 @@ function startGame() {
   console.log("Starting game...", gameState);
 
   if (!gameState.isRoomCreator) {
-    return UI.showNotification(
-      "Only the room creator can start the game",
-      "error"
-    );
+    return UI.showNotification("Only the room creator can start the game", "error");
   }
 
   UI.showLoading("Starting game...");
@@ -690,17 +639,10 @@ function startGameUI(state) {
 
 function deleteLobby() {
   if (!gameState.isRoomCreator) {
-    return UI.showNotification(
-      "Only the room creator can delete the lobby",
-      "error"
-    );
+    return UI.showNotification("Only the room creator can delete the lobby", "error");
   }
 
-  if (
-    confirm(
-      "Are you sure you want to delete this lobby? All players will be disconnected."
-    )
-  ) {
+  if (confirm("Are you sure you want to delete this lobby? All players will be disconnected.")) {
     UI.showLoading("Deleting lobby...");
     socket.emit("delete_room", { roomId: gameState.roomId });
   }
@@ -709,18 +651,14 @@ function deleteLobby() {
 function leaveLobby() {
   resetGameState();
   socket.disconnect();
-  
+
   // Reconnect socket for future games
   socket.connect();
   UI.showScreen("splash-screen");
 }
 
 function reportSelfCaught() {
-  if (
-    confirm(
-      "Are you sure you want to report yourself as caught? This cannot be undone."
-    )
-  ) {
+  if (confirm("Are you sure you want to report yourself as caught? This cannot be undone.")) {
     socket.emit("player_caught", {
       caughtPlayerId: gameState.playerId,
     });
@@ -728,11 +666,7 @@ function reportSelfCaught() {
 }
 
 function leaveGame() {
-  if (
-    confirm(
-      "Are you sure you want to leave the game? Your progress will be lost."
-    )
-  ) {
+  if (confirm("Are you sure you want to leave the game? Your progress will be lost.")) {
     resetGameState();
     socket.disconnect();
 
@@ -817,7 +751,7 @@ function returnToActiveGame() {
 function handleZoneActivated(data) {
   console.log("Zone activated:", data);
   UI.showNotification("A zone has been activated! You can now capture it.", "success");
-  
+
   // Update game state with the latest data
   Game.updateGameState(data.gameState);
 }
@@ -826,7 +760,7 @@ function handleZoneActivated(data) {
 function handleRunnerWon(data) {
   console.log("Runner won:", data);
   UI.showNotification(`${data.username} has reached their target and won!`, "success");
-  
+
   // Request updated game state
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
