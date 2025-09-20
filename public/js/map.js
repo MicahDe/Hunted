@@ -472,7 +472,10 @@ const GameMap = {
 
   // Update runner location on map (for hunters)
   updateRunnerLocation: function (data) {
-    if (!this.gameMap || gameState.team !== "hunter") return;
+    // if (!this.gameMap || gameState.team !== "hunter") return;
+
+    // Don't show ourselves
+    if (data.playerId === gameState.playerId) return;
 
     const { playerId, username, lat, lng, timestamp, locationHistory } = data;
 
@@ -564,7 +567,7 @@ const GameMap = {
     }
 
     // Handle historical location trail
-    if (locationHistory && locationHistory.length > 0) {
+    if (locationHistory && locationHistory.length > 0 && gameState.team !== "hunter") {
       this.updateRunnerHistoryTrail(playerId, locationHistory, lat, lng, timestamp, username);
     }
   },
