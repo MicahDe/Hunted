@@ -234,6 +234,7 @@ const GameMap = {
     // Create map
     this.gameMap = L.map("game-map", {
       zoomControl: false,
+      attributionControl: false,
     });
 
     // Add OpenStreetMap tiles
@@ -354,7 +355,7 @@ const GameMap = {
     // Create map with default view first
     this.lobbyMap = L.map("lobby-map", {
       zoomControl: false,
-      attributionControl: true,
+      attributionControl: false,
     }).setView([40.7128, -74.006], 11); // Default view to ensure initialization
 
     // Add OpenStreetMap tiles
