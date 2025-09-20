@@ -71,9 +71,7 @@ const UI = {
     teamBtns.forEach((btn) => {
       btn.classList.remove("selected");
     });
-    document
-      .querySelector("#create-room-form .hunter-team")
-      .classList.add("selected");
+    document.querySelector("#create-room-form .hunter-team").classList.add("selected");
 
     // Short delay to ensure the screen is fully visible before initializing the map
     // This is crucial because Leaflet needs a visible container to initialize properly
@@ -99,16 +97,12 @@ const UI = {
     teamBtns.forEach((btn) => {
       btn.classList.remove("selected");
     });
-    document
-      .querySelector("#join-room-form .hunter-team")
-      .classList.add("selected");
+    document.querySelector("#join-room-form .hunter-team").classList.add("selected");
   },
 
   // Set up notification system
   setupNotifications: function () {
-    this.notificationContainer = document.getElementById(
-      "notification-container"
-    );
+    this.notificationContainer = document.getElementById("notification-container");
   },
 
   // Show a notification
@@ -158,9 +152,7 @@ const UI = {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = Math.floor(seconds % 60);
 
-    timeElement.textContent = `${minutes
-      .toString()
-      .padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
+    timeElement.textContent = `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
 
     // Add warning class if time is running low (less than 5 minutes)
     if (seconds < 300) {
@@ -193,11 +185,7 @@ const UI = {
       listItem.className = "player-item";
       listItem.innerHTML = `
                 <span class="player-name">${hunter.username}</span>
-                ${
-                  hunter.status === "caught"
-                    ? '<span class="player-status caught">Caught</span>'
-                    : ""
-                }
+                ${hunter.status === "caught" ? '<span class="player-status caught">Caught</span>' : ""}
             `;
       hunterList.appendChild(listItem);
     });
@@ -208,13 +196,7 @@ const UI = {
       listItem.className = "player-item";
       listItem.innerHTML = `
                 <span class="player-name">${runner.username}</span>
-                ${
-                  runner.status === "caught"
-                    ? '<span class="player-status caught">Caught</span>'
-                    : runner.status === "won"
-                    ? '<span class="player-status won">Won</span>'
-                    : ""
-                }
+                ${runner.status === "caught" ? '<span class="player-status caught">Caught</span>' : runner.status === "won" ? '<span class="player-status won">Won</span>' : ""}
             `;
       runnerList.appendChild(listItem);
     });
@@ -237,8 +219,7 @@ const UI = {
     const teamValue = document.getElementById("team-value");
     if (teamValue) {
       teamValue.textContent = team.charAt(0).toUpperCase() + team.slice(1);
-      teamValue.className =
-        team === "hunter" ? "hunter-team-text" : "runner-team-text";
+      teamValue.className = team === "hunter" ? "hunter-team-text" : "runner-team-text";
     }
   },
 };

@@ -23,9 +23,7 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
   // Haversine formula
   const dLat = rlat2 - rlat1;
   const dLng = rlng2 - rlng1;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(rlat1) * Math.cos(rlat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(rlat1) * Math.cos(rlat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = EARTH_RADIUS * c;
 
@@ -84,9 +82,7 @@ function generateRandomOffset(centerLat, centerLng, outerRadius, innerRadius) {
 
   // Calculate offset in lat/lng
   const latOffset = (offsetDistance / EARTH_RADIUS) * (180 / Math.PI);
-  const lngOffset =
-    (offsetDistance / (EARTH_RADIUS * Math.cos((centerLat * Math.PI) / 180))) *
-    (180 / Math.PI);
+  const lngOffset = (offsetDistance / (EARTH_RADIUS * Math.cos((centerLat * Math.PI) / 180))) * (180 / Math.PI);
 
   // Calculate new center point
   const offsetLat = centerLat + latOffset * Math.cos(angle);
@@ -149,9 +145,7 @@ function calculateBearing(lat1, lng1, lat2, lng2) {
 
   // Calculate bearing
   const y = Math.sin(rlng2 - rlng1) * Math.cos(rlat2);
-  const x =
-    Math.cos(rlat1) * Math.sin(rlat2) -
-    Math.sin(rlat1) * Math.cos(rlat2) * Math.cos(rlng2 - rlng1);
+  const x = Math.cos(rlat1) * Math.sin(rlat2) - Math.sin(rlat1) * Math.cos(rlat2) * Math.cos(rlng2 - rlng1);
   let bearing = (Math.atan2(y, x) * 180) / Math.PI;
 
   // Normalize to 0-360
@@ -173,26 +167,20 @@ function calculateDestination(lat, lng, bearing, distance) {
   const rlat = (lat * Math.PI) / 180;
   const rlng = (lng * Math.PI) / 180;
   const rbearing = (bearing * Math.PI) / 180;
-  
+
   // Angular distance
   const angularDistance = distance / EARTH_RADIUS;
-  
+
   // Calculate destination latitude
-  const rlat2 = Math.asin(
-    Math.sin(rlat) * Math.cos(angularDistance) +
-    Math.cos(rlat) * Math.sin(angularDistance) * Math.cos(rbearing)
-  );
-  
+  const rlat2 = Math.asin(Math.sin(rlat) * Math.cos(angularDistance) + Math.cos(rlat) * Math.sin(angularDistance) * Math.cos(rbearing));
+
   // Calculate destination longitude
-  const rlng2 = rlng + Math.atan2(
-    Math.sin(rbearing) * Math.sin(angularDistance) * Math.cos(rlat),
-    Math.cos(angularDistance) - Math.sin(rlat) * Math.sin(rlat2)
-  );
-  
+  const rlng2 = rlng + Math.atan2(Math.sin(rbearing) * Math.sin(angularDistance) * Math.cos(rlat), Math.cos(angularDistance) - Math.sin(rlat) * Math.sin(rlat2));
+
   // Convert back to degrees
   const lat2 = (rlat2 * 180) / Math.PI;
   const lng2 = (rlng2 * 180) / Math.PI;
-  
+
   return {
     lat: lat2,
     lng: lng2,
@@ -210,16 +198,16 @@ function calculateDestination(lat, lng, bearing, distance) {
 function calculateInternallyTangentCirclePosition(outerRadius, innerRadius, innerLat, innerLng) {
   // Calculate the distance between centers (difference of radii for internally tangent circles)
   const distanceBetweenCenters = outerRadius - innerRadius;
-  
+
   // Create a hash by combining the values of lat, lng and innerRadius
-  const hashValue = (innerLat * 1000000) + (innerLng * 10000) + innerRadius;
+  const hashValue = innerLat * 1000000 + innerLng * 10000 + innerRadius;
   // Use a simple transformative function to generate an angle between 0 and 2π
   const deterministicAngle = ((hashValue * 9973) % 628) / 100; // 9973 is a prime number, mod 628 then divide by 100 to get 0-6.28
-  
+
   // Calculate the new position
-  const outerLat = innerLat + (distanceBetweenCenters * Math.sin(deterministicAngle) / 111320); // Approx meters per degree latitude
-  const outerLng = innerLng + (distanceBetweenCenters * Math.cos(deterministicAngle) / (111320 * Math.cos(innerLat * Math.PI / 180))); // Adjust for longitude
-  
+  const outerLat = innerLat + (distanceBetweenCenters * Math.sin(deterministicAngle)) / 111320; // Approx meters per degree latitude
+  const outerLng = innerLng + (distanceBetweenCenters * Math.cos(deterministicAngle)) / (111320 * Math.cos((innerLat * Math.PI) / 180)); // Adjust for longitude
+
   return { lat: outerLat, lng: outerLng };
 }
 
@@ -233,31 +221,28 @@ function calculateInternallyTangentCirclePosition(outerRadius, innerRadius, inne
 function generateNestedCirclePositions(targetLat, targetLng, radiusLevels) {
   // Sort radius levels in ascending order (smallest to largest)
   const sortedRadii = [...radiusLevels].sort((a, b) => a - b);
-  
+
   // Initialize with the smallest circle at the target location
-  const positions = [{ 
-    lat: targetLat,
-    lng: targetLng,
-    radius: sortedRadii[0]
-  }];
-  
+  const positions = [
+    {
+      lat: targetLat,
+      lng: targetLng,
+      radius: sortedRadii[0],
+    },
+  ];
+
   // Generate positions for larger circles
   for (let i = 1; i < sortedRadii.length; i++) {
-    const innerCircle = positions[i-1];
-    const newPosition = calculateInternallyTangentCirclePosition(
-      sortedRadii[i],
-      innerCircle.radius,
-      innerCircle.lat,
-      innerCircle.lng
-    );
-    
+    const innerCircle = positions[i - 1];
+    const newPosition = calculateInternallyTangentCirclePosition(sortedRadii[i], innerCircle.radius, innerCircle.lat, innerCircle.lng);
+
     positions.push({
       lat: newPosition.lat,
       lng: newPosition.lng,
-      radius: sortedRadii[i]
+      radius: sortedRadii[i],
     });
   }
-  
+
   return positions;
 }
 
@@ -273,11 +258,11 @@ function generateNestedCirclePositions(targetLat, targetLng, radiusLevels) {
  */
 function isPlayerInNestedTargetArea(playerLat, playerLng, targetLat, targetLng, targetRadius, radiusLevels) {
   // Filter radius levels to only include those less than or equal to the current target radius
-  const activeRadiusLevels = radiusLevels.filter(r => r <= targetRadius);
-  
+  const activeRadiusLevels = radiusLevels.filter((r) => r <= targetRadius);
+
   // Generate positions for all nested circles
   const circlePositions = generateNestedCirclePositions(targetLat, targetLng, activeRadiusLevels);
-  
+
   // Check if player is within any of the circles
   for (const position of circlePositions) {
     const distanceToCircle = calculateDistance(playerLat, playerLng, position.lat, position.lng);
@@ -285,11 +270,11 @@ function isPlayerInNestedTargetArea(playerLat, playerLng, targetLat, targetLng, 
       return true;
     }
   }
-  
+
   return false;
 }
 
-if (typeof module !== 'undefined' && module.exports) {
+if (typeof module !== "undefined" && module.exports) {
   // Node.js environment
   module.exports = {
     calculateDistance,
@@ -303,7 +288,7 @@ if (typeof module !== 'undefined' && module.exports) {
     generateNestedCirclePositions,
     isPlayerInNestedTargetArea,
   };
-} else if (typeof window !== 'undefined') {
+} else if (typeof window !== "undefined") {
   // Browser environment
   window.geoUtils = {
     calculateDistance,

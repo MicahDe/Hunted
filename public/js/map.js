@@ -3,7 +3,6 @@
  * Uses Leaflet.js with OpenStreetMap
  */
 
-
 const GameMap = {
   // Map instances
   setupMap: null, // Map for room setup
@@ -30,7 +29,7 @@ const GameMap = {
 
   // Timer for updating labels
   labelUpdateTimer: null,
-  
+
   // Runner data cache to enable label updates
   runnerDataCache: {},
 
@@ -95,8 +94,7 @@ const GameMap = {
 
     // Add OpenStreetMap tiles
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(this.setupMap);
 
     // Add zoom control to top right
@@ -158,11 +156,8 @@ const GameMap = {
         }).addTo(this.setupMap);
 
         this.updateSelectedLocationDisplay();
-        UI.showNotification(
-          "Could not get your location. Please click on the map to set a starting point.",
-          "warning"
-        );
-      }
+        UI.showNotification("Could not get your location. Please click on the map to set a starting point.", "warning");
+      },
     );
 
     // Handle map clicks for selecting location
@@ -195,9 +190,7 @@ const GameMap = {
     if (!locationDisplay) return;
 
     if (this.selectedLocation) {
-      locationDisplay.textContent = `Lat: ${this.selectedLocation.lat.toFixed(
-        6
-      )}, Lng: ${this.selectedLocation.lng.toFixed(6)}`;
+      locationDisplay.textContent = `Lat: ${this.selectedLocation.lat.toFixed(6)}, Lng: ${this.selectedLocation.lng.toFixed(6)}`;
     } else {
       locationDisplay.textContent = "";
     }
@@ -231,7 +224,7 @@ const GameMap = {
     this.targetCircles = {};
     this.boundaryCircle = null;
     this.runnerDataCache = {};
-    
+
     // Clear any existing timer
     if (this.labelUpdateTimer) {
       clearInterval(this.labelUpdateTimer);
@@ -245,8 +238,7 @@ const GameMap = {
 
     // Add OpenStreetMap tiles
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution:
-        '&copy;<a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy;Micah De Silva',
+      attribution: '&copy;<a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy;Micah De Silva',
     }).addTo(this.gameMap);
 
     // Add zoom control to top right
@@ -273,7 +265,7 @@ const GameMap = {
 
     // Start tracking player location
     this.startLocationTracking();
-    
+
     // Start timer to update runner labels
     this.startLabelUpdateTimer();
   },
@@ -285,15 +277,11 @@ const GameMap = {
       this.updatePlayerLocation(position);
 
       // Then start watching position
-      this.watchPositionId = navigator.geolocation.watchPosition(
-        this.updatePlayerLocation.bind(this),
-        this.handleLocationError.bind(this),
-        {
-          enableHighAccuracy: true,
-          maximumAge: 0,
-          timeout: 5000,
-        }
-      );
+      this.watchPositionId = navigator.geolocation.watchPosition(this.updatePlayerLocation.bind(this), this.handleLocationError.bind(this), {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 5000,
+      });
     });
   },
 
@@ -310,10 +298,7 @@ const GameMap = {
     if ("geolocation" in navigator) {
       // Add a timeout to handle slow geolocation responses
       const locationTimeout = setTimeout(() => {
-        UI.showNotification(
-          "Location request is taking longer than expected. You can click the map to set a location manually.",
-          "info"
-        );
+        UI.showNotification("Location request is taking longer than expected. You can click the map to set a location manually.", "info");
       }, 3000);
 
       navigator.geolocation.getCurrentPosition(
@@ -333,13 +318,10 @@ const GameMap = {
           enableHighAccuracy: true,
           maximumAge: 0,
           timeout: 10000, // Increased timeout to 10 seconds
-        }
+        },
       );
     } else {
-      UI.showNotification(
-        "Geolocation is not supported by your browser. Please click on the map to set a location.",
-        "error"
-      );
+      UI.showNotification("Geolocation is not supported by your browser. Please click on the map to set a location.", "error");
       if (errorCallback) {
         errorCallback(new Error("Geolocation not supported"));
       }
@@ -348,11 +330,7 @@ const GameMap = {
 
   // Initialize the lobby map
   initLobbyMap: function (centerLat, centerLng, playAreaRadius = 5000) {
-    console.log(
-      "Initializing lobby map with coordinates:",
-      centerLat,
-      centerLng
-    );
+    console.log("Initializing lobby map with coordinates:", centerLat, centerLng);
 
     // Get map container
     const mapContainer = document.getElementById("lobby-map");
@@ -381,8 +359,7 @@ const GameMap = {
 
     // Add OpenStreetMap tiles
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(this.lobbyMap);
 
     // Force map to update size
@@ -470,12 +447,10 @@ const GameMap = {
     let message;
     switch (error.code) {
       case error.PERMISSION_DENIED:
-        message =
-          "Location access was denied. Please enable location services for this game.";
+        message = "Location access was denied. Please enable location services for this game.";
         break;
       case error.POSITION_UNAVAILABLE:
-        message =
-          "Location information is unavailable. Please check your GPS signal.";
+        message = "Location information is unavailable. Please check your GPS signal.";
         break;
       case error.TIMEOUT:
         message = "Location request timed out. Please try again.";
@@ -491,10 +466,7 @@ const GameMap = {
   centerOnPlayer: function () {
     if (!this.gameMap || !this.currentLocation) return;
 
-    this.gameMap.setView(
-      [this.currentLocation.lat, this.currentLocation.lng],
-      16
-    );
+    this.gameMap.setView([this.currentLocation.lat, this.currentLocation.lng], 16);
   },
 
   // Update runner location on map (for hunters)
@@ -502,24 +474,24 @@ const GameMap = {
     if (!this.gameMap || gameState.team !== "hunter") return;
 
     const { playerId, username, lat, lng, timestamp, locationHistory } = data;
-    
+
     // Store data in cache for later updates
     this.runnerDataCache[playerId] = {
       username,
       lat,
       lng,
       timestamp,
-      locationHistory
+      locationHistory,
     };
-    
+
     // Calculate time elapsed since last update
     const currentTime = Date.now();
     const timeElapsed = (currentTime - timestamp) / 1000; // in seconds
-    
+
     // Calculate opacity based on time elapsed (5 mins = 300 seconds)
     // Opacity ranges from 1.0 (fresh) to 0.8 (5 mins old)
     const mainMarkerOpacity = Math.max(0.8, 1 - (timeElapsed / 300) * 0.2);
-    
+
     // Format the time elapsed for display
     const timeElapsedText = this.formatTimeElapsed(timeElapsed);
 
@@ -527,10 +499,10 @@ const GameMap = {
     if (this.runnerMarkers[playerId]) {
       // Update marker position
       this.runnerMarkers[playerId].setLatLng([lat, lng]);
-      
+
       // Update marker opacity
       this.runnerMarkers[playerId].setOpacity(mainMarkerOpacity);
-      
+
       // Ensure marker is on top
       this.runnerMarkers[playerId].setZIndexOffset(1000);
 
@@ -542,21 +514,21 @@ const GameMap = {
               </div>
           `;
       this.runnerMarkers[playerId].getPopup().setContent(popupContent);
-      
+
       // Update label content
       if (this.runnerLabels[playerId]) {
         // Create a new divIcon with updated content
         const updatedIcon = L.divIcon({
-          className: 'runner-label-container',
+          className: "runner-label-container",
           html: `<div class="runner-label">Seen: ${timeElapsedText} ago</div>`,
           iconSize: [100, 40],
-          iconAnchor: [50, -15]
+          iconAnchor: [50, -15],
         });
-        
+
         // Set the new icon on the marker
         this.runnerLabels[playerId].setIcon(updatedIcon);
         this.runnerLabels[playerId].setLatLng([lat, lng]);
-        
+
         // Ensure label is on top
         this.runnerLabels[playerId].setZIndexOffset(1000);
       }
@@ -565,7 +537,7 @@ const GameMap = {
       this.runnerMarkers[playerId] = L.marker([lat, lng], {
         icon: this.icons.runner,
         opacity: mainMarkerOpacity,
-        zIndexOffset: 1000 // Ensure it's on top of history markers
+        zIndexOffset: 1000, // Ensure it's on top of history markers
       }).addTo(this.gameMap);
 
       // Add popup
@@ -576,75 +548,75 @@ const GameMap = {
               </div>
           `;
       this.runnerMarkers[playerId].bindPopup(popupContent);
-      
+
       // Add label beneath the marker
       this.runnerLabels = this.runnerLabels || {};
       this.runnerLabels[playerId] = L.marker([lat, lng], {
         icon: L.divIcon({
-          className: 'runner-label-container',
+          className: "runner-label-container",
           html: `<div class="runner-label">Seen: ${timeElapsedText} ago</div>`,
           iconSize: [100, 40],
-          iconAnchor: [50, -15]
+          iconAnchor: [50, -15],
         }),
-        zIndexOffset: 1000 // Ensure it's on top of history markers
+        zIndexOffset: 1000, // Ensure it's on top of history markers
       }).addTo(this.gameMap);
     }
-    
+
     // Handle historical location trail
     if (locationHistory && locationHistory.length > 0) {
       this.updateRunnerHistoryTrail(playerId, locationHistory, lat, lng, timestamp, username);
     }
   },
-  
+
   // Update the runner's historical location trail
-  updateRunnerHistoryTrail: function(playerId, locationHistory, currentLat, currentLng, currentTimestamp, username) {
+  updateRunnerHistoryTrail: function (playerId, locationHistory, currentLat, currentLng, currentTimestamp, username) {
     const currentTime = Date.now();
-    
+
     // Remove old history markers and polylines if they exist
     if (this.runnerHistoryMarkers && this.runnerHistoryMarkers[playerId]) {
-      this.runnerHistoryMarkers[playerId].forEach(marker => {
+      this.runnerHistoryMarkers[playerId].forEach((marker) => {
         this.gameMap.removeLayer(marker);
       });
     }
-    
+
     if (this.runnerHistoryLines && this.runnerHistoryLines[playerId]) {
       this.gameMap.removeLayer(this.runnerHistoryLines[playerId]);
     }
-    
+
     // Initialize arrays for this player if they don't exist
     this.runnerHistoryMarkers = this.runnerHistoryMarkers || {};
     this.runnerHistoryLines = this.runnerHistoryLines || {};
     this.runnerHistoryMarkers[playerId] = [];
-    
+
     // Location history is limited to 20 points from the server
     // Create all points including current location
     const allPoints = [...locationHistory, { lat: currentLat, lng: currentLng, timestamp: currentTimestamp }];
-    
+
     // Prepare line coordinates and create history markers
     const lineCoordinates = [];
-    
+
     // Process points from oldest to newest so newer points are added later (and thus on top)
     allPoints.forEach((point, index) => {
       if (index === allPoints.length - 1) return; // Skip current position, already has main marker
-      
+
       const { lat, lng, timestamp } = point;
       lineCoordinates.push([lat, lng]);
-      
+
       // Calculate time elapsed for this point (convert to seconds)
       const timeElapsed = (currentTime - timestamp) / 1000;
-      
+
       // Calculate opacity based on time elapsed (30 mins = 1800 seconds)
       // Opacity ranges from 0.8 (fresh) to 0.4 (30 mins old)
       const opacity = Math.max(0.4, 0.8 - (timeElapsed / 1800) * 0.4);
-      
+
       // Only create history markers if they're still visible
       if (opacity > 0.05) {
         // Format timestamp for display
         const timeElapsedText = this.formatTimeElapsed(timeElapsed);
-        
+
         // Create mini runner icon for history point
         const historyIcon = L.divIcon({
-          className: 'history-marker',
+          className: "history-marker",
           html: `
             <div class="history-marker-runner" style="opacity: ${opacity}">
               <img src="assets/icons/runner.svg" alt="Runner">
@@ -652,91 +624,91 @@ const GameMap = {
             <div class="history-marker-label" style="opacity: ${opacity}">Seen: ${timeElapsedText} ago</div>
           `,
           iconSize: [50, 30],
-          iconAnchor: [25, 15]
+          iconAnchor: [25, 15],
         });
-        
+
         // Calculate z-index based on timestamp - newer points get higher z-index
         // Normalize to a reasonable range: 100-500 (Leaflet default z-index for markers is 300)
         const zIndexOffset = Math.floor((timestamp - (currentTime - 1800000)) / 3600);
-        
+
         // Create marker
         const marker = L.marker([lat, lng], {
           icon: historyIcon,
           opacity: 1, // We control opacity within the icon HTML
-          zIndexOffset: zIndexOffset // Set z-index based on timestamp
+          zIndexOffset: zIndexOffset, // Set z-index based on timestamp
         }).addTo(this.gameMap);
-        
+
         // Add small tooltip with more info
         marker.bindTooltip(`${username}<br>Seen: ${timeElapsedText} ago`, {
           permanent: false,
-          direction: 'top',
-          opacity: opacity
+          direction: "top",
+          opacity: opacity,
         });
-        
+
         this.runnerHistoryMarkers[playerId].push(marker);
       }
     });
-    
+
     // Add current location to line
     lineCoordinates.push([currentLat, currentLng]);
-    
+
     // Create gradient polyline for the history trail
     if (lineCoordinates.length > 1) {
       this.runnerHistoryLines[playerId] = this.createGradientLine(
         lineCoordinates,
-        allPoints.map(p => p.timestamp)
+        allPoints.map((p) => p.timestamp),
       ).addTo(this.gameMap);
     }
   },
-  
+
   // Create a polyline with gradient opacity based on timestamp
-  createGradientLine: function(coordinates, timestamps) {
+  createGradientLine: function (coordinates, timestamps) {
     const currentTime = Date.now();
-    
+
     // Create line segments with varying opacity
     const lineSegments = [];
     for (let i = 0; i < coordinates.length - 1; i++) {
       // Calculate average time elapsed for this segment
-      const avgTimestamp = (timestamps[i] + timestamps[i+1]) / 2;
+      const avgTimestamp = (timestamps[i] + timestamps[i + 1]) / 2;
       const timeElapsed = (currentTime - avgTimestamp) / 1000; // in seconds
-      
+
       // Calculate opacity based on time elapsed (30 mins = 1800 seconds)
       // Opacity ranges from 0.8 (fresh) to 0.5 (30 mins old)
       const opacity = Math.max(0.5, 0.8 - (timeElapsed / 1800) * 0.3);
-      
+
       // Only add line segment if it's still above 50% opacity
       if (opacity > 0.5) {
         lineSegments.push({
-          coords: [coordinates[i], coordinates[i+1]],
+          coords: [coordinates[i], coordinates[i + 1]],
           opacity: opacity,
-          timestamp: avgTimestamp
+          timestamp: avgTimestamp,
         });
       }
     }
-    
+
     // Sort segments by timestamp so newer lines are added last (and appear on top)
     lineSegments.sort((a, b) => a.timestamp - b.timestamp);
-    
+
     // Create a feature group to hold all line segments
     const lineGroup = L.featureGroup();
-    
+
     // Add each line segment with its calculated opacity
-    lineSegments.forEach(segment => {
+    lineSegments.forEach((segment) => {
       const line = L.polyline(segment.coords, {
-        color: '#ff6b6b',
+        color: "#ff6b6b",
         weight: 3,
         opacity: segment.opacity,
-        dashArray: '5, 5'
+        dashArray: "5, 5",
       });
-      
+
       lineGroup.addLayer(line);
     });
-    
+
     return lineGroup;
   },
-  
+
   // Format time elapsed for display
-  formatTimeElapsed: function(seconds) {
+  formatTimeElapsed: function (seconds) {
     if (seconds < 60) {
       return `${Math.floor(seconds)}s`;
     } else if (seconds < 3600) {
@@ -755,7 +727,7 @@ const GameMap = {
       console.log("Skipping targets for hunter");
       return;
     }
-    
+
     console.log("Updating targets for player team:", playerTeam);
     console.log("Available targets:", targets);
 
@@ -766,7 +738,7 @@ const GameMap = {
         delete this.targetMarkers[targetId];
       }
     });
-    
+
     Object.keys(this.targetCircles).forEach((targetId) => {
       if (this.targetCircles[targetId]) {
         this.gameMap.removeLayer(this.targetCircles[targetId]);
@@ -775,11 +747,8 @@ const GameMap = {
     });
 
     // Only process targets for current player and with active status
-    const myActiveTargets = targets.filter(target => 
-      target.playerId === gameState.playerId && 
-      target.status !== 'reached'
-    );
-    
+    const myActiveTargets = targets.filter((target) => target.playerId === gameState.playerId && target.status !== "reached");
+
     console.log(`Found ${myActiveTargets.length} active targets for current player`);
 
     // For runners, we should only have at most one active target
@@ -787,26 +756,21 @@ const GameMap = {
       // If somehow there are multiple targets, just use the first one
       const target = myActiveTargets[0];
       console.log("Processing target:", target);
-      
+
       // Only create circles for runner
       if (playerTeam === "runner") {
         // Create a feature group to hold all circles
         this.targetCircles[target.targetId] = L.featureGroup().addTo(this.gameMap);
-        
+
         // Get radius levels from the game config
         const radiusLevels = [2000, 1000, 500, 250, 125]; // Should really be getting this from config.game.targetRadiusLevels
-        
+
         // Generate positions for nested circles
-        const circlePositions = geoUtils.generateNestedCirclePositions(
-          target.location.lat,
-          target.location.lng,
-          radiusLevels
-        );
-        
+        const circlePositions = geoUtils.generateNestedCirclePositions(target.location.lat, target.location.lng, radiusLevels);
+
         // Determine if the zone is active
-        const isActive = target.zoneStatus === 'active' || 
-                         (target.activationTime && Date.now() > target.activationTime);
-        
+        const isActive = target.zoneStatus === "active" || (target.activationTime && Date.now() > target.activationTime);
+
         // Create each circle at its calculated position
         circlePositions.forEach((position, index) => {
           if (position.radius !== target.radiusLevel) {
@@ -814,10 +778,10 @@ const GameMap = {
           }
 
           // Use different colors for active vs inactive zones
-          const circleColor = isActive ? '#4caf50' : '#ef7d54';
+          const circleColor = isActive ? "#4caf50" : "#ef7d54";
           const fillOpacity = 0.3;
           const dashArray = isActive ? null : "5, 5";
-          
+
           // Create circle with the specified radius at the calculated position
           const circle = L.circle([position.lat, position.lng], {
             radius: position.radius,
@@ -826,9 +790,9 @@ const GameMap = {
             fillOpacity: fillOpacity,
             weight: 2,
             dashArray: dashArray,
-            className: `map-circle-target map-circle-target-level-${position.radius} ${isActive ? 'active-zone' : 'inactive-zone'}`,
+            className: `map-circle-target map-circle-target-level-${position.radius} ${isActive ? "active-zone" : "inactive-zone"}`,
           });
-          
+
           // Add the circle to the feature group
           this.targetCircles[target.targetId].addLayer(circle);
         });
@@ -851,44 +815,44 @@ const GameMap = {
   },
 
   // Start timer to update runner labels
-  startLabelUpdateTimer: function() {
+  startLabelUpdateTimer: function () {
     // Clear any existing timer
     if (this.labelUpdateTimer) {
       clearInterval(this.labelUpdateTimer);
     }
-    
+
     // Start new timer - update every 10 seconds
     this.labelUpdateTimer = setInterval(() => {
       this.updateAllRunnerLabels();
     }, 10000);
   },
-  
+
   // Update all runner labels with current time differences
-  updateAllRunnerLabels: function() {
+  updateAllRunnerLabels: function () {
     const currentTime = Date.now();
-    
+
     // Only do this for hunters
     if (gameState.team !== "hunter") return;
-    
+
     // Update main runner markers
-    Object.keys(this.runnerDataCache).forEach(playerId => {
+    Object.keys(this.runnerDataCache).forEach((playerId) => {
       const data = this.runnerDataCache[playerId];
       if (!data) return;
-      
+
       const { username, timestamp } = data;
-      
+
       // Calculate new time elapsed
       const timeElapsed = (currentTime - timestamp) / 1000;
       const timeElapsedText = this.formatTimeElapsed(timeElapsed);
-      
+
       // Update main marker opacity
       const mainMarkerOpacity = Math.max(0.8, 1 - (timeElapsed / 300) * 0.2);
-      
+
       // Update main marker if it exists
       if (this.runnerMarkers[playerId]) {
         // Update opacity
         this.runnerMarkers[playerId].setOpacity(mainMarkerOpacity);
-        
+
         // Update popup
         const popupContent = `
           <div class="map-player-popup map-player-popup-runner">
@@ -896,61 +860,61 @@ const GameMap = {
             Last seen: ${timeElapsedText} ago
           </div>
         `;
-        
+
         // Check if popup exists before updating
         const popup = this.runnerMarkers[playerId].getPopup();
         if (popup) {
           popup.setContent(popupContent);
         }
       }
-      
+
       // Update label
       if (this.runnerLabels[playerId]) {
         const updatedIcon = L.divIcon({
-          className: 'runner-label-container',
+          className: "runner-label-container",
           html: `<div class="runner-label">Seen: ${timeElapsedText} ago</div>`,
           iconSize: [100, 40],
-          iconAnchor: [50, -15]
+          iconAnchor: [50, -15],
         });
-        
+
         this.runnerLabels[playerId].setIcon(updatedIcon);
       }
-      
+
       // Update history markers
       if (data.locationHistory && this.runnerHistoryMarkers[playerId]) {
         this.updateHistoryMarkerLabels(playerId, data.locationHistory, username);
       }
     });
   },
-  
+
   // Update history marker labels
-  updateHistoryMarkerLabels: function(playerId, locationHistory, username) {
+  updateHistoryMarkerLabels: function (playerId, locationHistory, username) {
     const currentTime = Date.now();
     const markers = this.runnerHistoryMarkers[playerId];
-    
+
     // Skip if no markers
     if (!markers || !markers.length) return;
-    
+
     // We can't easily map markers back to their original points
     // since they're just in an array, so we'll update all of them
     // with recalculated opacity and time text
     locationHistory.forEach((point, index) => {
       if (index >= markers.length) return;
-      
+
       const marker = markers[index];
       const { timestamp } = point;
-      
+
       // Calculate time elapsed
       const timeElapsed = (currentTime - timestamp) / 1000;
       const timeElapsedText = this.formatTimeElapsed(timeElapsed);
-      
+
       // Calculate opacity
       const opacity = Math.max(0.4, 0.8 - (timeElapsed / 1800) * 0.4);
-      
+
       // Update icon
       if (opacity > 0.05) {
         const historyIcon = L.divIcon({
-          className: 'history-marker',
+          className: "history-marker",
           html: `
             <div class="history-marker-runner" style="opacity: ${opacity}">
               <img src="assets/icons/runner.svg" alt="Runner">
@@ -958,17 +922,17 @@ const GameMap = {
             <div class="history-marker-label" style="opacity: ${opacity}">Seen: ${timeElapsedText} ago</div>
           `,
           iconSize: [50, 30],
-          iconAnchor: [25, 15]
+          iconAnchor: [25, 15],
         });
-        
+
         marker.setIcon(historyIcon);
-        
+
         // Update tooltip
         marker.unbindTooltip();
         marker.bindTooltip(`${username}<br>Seen: ${timeElapsedText} ago`, {
           permanent: false,
-          direction: 'top',
-          opacity: opacity
+          direction: "top",
+          opacity: opacity,
         });
       }
     });

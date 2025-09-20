@@ -13,7 +13,7 @@ const io = socketIO(server);
 // Middleware
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../public")));
-app.use('/shared', express.static(path.join(__dirname, "../shared")));
+app.use("/shared", express.static(path.join(__dirname, "../shared")));
 
 // Database setup
 const dbPath = path.join(__dirname, "../database/hunted.db");
@@ -79,7 +79,7 @@ function initDatabase() {
             FOREIGN KEY(room_id) REFERENCES rooms(room_id) ON DELETE CASCADE,
             FOREIGN KEY(player_id) REFERENCES players(player_id)
         )`);
-    
+
     // Target discoveries table to track points earned
     db.run(`CREATE TABLE IF NOT EXISTS target_discoveries (
             discovery_id INTEGER PRIMARY KEY AUTOINCREMENT,
