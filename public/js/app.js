@@ -302,6 +302,12 @@ function handleJoinSuccess(data) {
   // Save session to localStorage
   saveGameSession();
 
+  // If game is active, go directly to game screen
+  if (data.gameState && data.gameState.status === "active") {
+    startGameUI(data.gameState);
+    return;
+  }
+
   // Show lobby screen
   UI.showScreen("lobby-screen");
   currentScreen = "lobby-screen";
