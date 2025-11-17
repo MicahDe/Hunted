@@ -11,6 +11,7 @@ const GameMap = {
 
   // Map markers and features
   playerMarker: null,
+  playerLabel: null,
   selectedLocationMarker: null,
   runnerMarkers: {},
   runnerLabels: {},
@@ -54,8 +55,8 @@ const GameMap = {
     this.icons.player = L.divIcon({
       className: "map-marker-player",
       html: `<img src="assets/icons/self-location.svg" alt="Self Location">`,
-      iconSize: [36, 36],
-      iconAnchor: [18, 18],
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
     });
 
     // Runner icon
@@ -224,6 +225,7 @@ const GameMap = {
 
     // Clear all markers and features
     this.playerMarker = null;
+    this.playerLabel = null;
     this.selectedLocationMarker = null;
     this.runnerMarkers = {};
     this.runnerLabels = {};
@@ -420,11 +422,27 @@ const GameMap = {
     if (this.playerMarker) {
       // Update marker position
       this.playerMarker.setLatLng([latitude, longitude]);
+      
+      // Update label position
+      if (this.playerLabel) {
+        this.playerLabel.setLatLng([latitude, longitude]);
+      }
     } else {
       // Create player marker
       this.playerMarker = L.marker([latitude, longitude], {
         icon: this.icons.player,
         zIndexOffset: 1000, // Make sure player is on top
+      }).addTo(this.gameMap);
+
+      // Create player label beneath the marker
+      this.playerLabel = L.marker([latitude, longitude], {
+        icon: L.divIcon({
+          className: "player-label-container",
+          html: `<div class="player-label">You</div>`,
+          iconSize: [80, 40],
+          iconAnchor: [40, -15],
+        }),
+        zIndexOffset: 1000,
       }).addTo(this.gameMap);
 
       // Center map on player
