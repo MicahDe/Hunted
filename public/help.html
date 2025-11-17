@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>HUNTED - How to Play</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="assets/icons/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="16x16" href="assets/icons/hunted-icon-16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/hunted-icon-32.png">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cutive+Mono&family=Libre+Barcode+128&display=swap" rel="stylesheet">
+
+    <!-- Internal CSS -->
+    <link rel="stylesheet" href="css/variables.css" />
+    <link rel="stylesheet" href="css/main.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div class="screen active">
+        <div class="screen-header">
+          <button class="back-btn" onclick="window.history.back()">&larr;</button>
+          <h2>How to Play</h2>
+        </div>
+        <div class="screen-content help-content">
+          <section class="help-section">
+            <h3>Game Overview</h3>
+            <p>HUNTED is a real-time GPS-based pursuit game with players split into two teams: Hunters and Runners. Runners navigate through progressively smaller zones to reach their final target while evading Hunters who track and attempt to catch them by taking their photo.</p>
+          </section>
+
+          <section class="help-section">
+            <h3>Teams</h3>
+            <div class="team-info">
+              <div class="team-card">
+                <img src="assets/icons/hunter.svg" alt="Hunter" class="help-icon" />
+                <h4>Hunters</h4>
+                <p>Track Runners in real-time and catch them by taking their photo. You MUST keep your app open at all times.</p>
+              </div>
+              <div class="team-card">
+                <img src="assets/icons/runner.svg" alt="Runner" class="help-icon" />
+                <h4>Runners</h4>
+                <p>Navigate through zones to reach your final target while staying hidden. Each Runner has their own unique final target zone.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="help-section">
+            <h3>For Runners</h3>
+            <p><strong>Your Mission:</strong> Navigate through progressively smaller zones until you reach your final target zone to win.</p>
+            
+            <p><strong>How Zones Work:</strong></p>
+            <ul>
+              <li>Each Runner has a unique final target location, randomly placed within the play area</li>
+              <li>You'll discover your target through a series of nested zones that get smaller as you progress</li>
+              <li>When a new zone first appears, it starts <strong>locked</strong> for a short time</li>
+              <li>Once unlocked, you can capture it to reveal the next zone</li>
+              <li>Each newly revealed zone will also start locked and you must wait for it to unlock before it can be captured</li>
+              <li>A countdown at the top of the screen shows when the current zone unlocks, plus how many zones remain</li>
+            </ul>
+
+            <p><strong>Location Pinging:</strong></p>
+            <ul>
+              <li>Your location is shared with Hunters while you have the app open.</li>
+              <li>You can see where other Runners and Hunters have pinged - use this intel wisely!</li>
+              <li>If you're already inside a locked zone, stay hidden and wait for it to unlock before opening the app again</li>
+              <li><strong>Warning:</strong> Taking too long to reach your final target gives Hunters more time to catch other Runners, who then join the hunt for you!</li>
+            </ul>
+
+            <p><strong>Getting Caught:</strong> If a Hunter takes your photo, report it using the "I've Been Caught" button. You'll become a Hunter and join the pursuit.</p>
+
+            <p><i>Being a successful Runner is about staying hidden and timing your movements carefully. Lay low, watch the map, and move strategically.</i></p>
+          </section>
+
+          <section class="help-section">
+            <h3>For Hunters</h3>
+            <ul>
+              <li><strong>Keep your app open at all times</strong></li>
+              <li>View the play area and track Runner locations on your map in real-time</li>
+              <li>See where Runners have pinged and predict their movements</li>
+              <li>Catch Runners by taking their photo (share it in your group chat as proof!)</li>
+              <li>Work together - caught Runners become Hunters, growing your team</li>
+              <li>The play area center is typically set to your starting location, so Runners are hiding nearby</li>
+            </ul>
+          </section>
+
+          <section class="help-section">
+            <h3>Winning</h3>
+            <p><strong>Runners Win Individually:</strong> Each Runner who reaches their final target zone is marked as having "won" - multiple Runners can win!</p>
+            <p><strong>Hunters Win Together:</strong> If all Runners are caught before any reach their final target, Hunters win as a team.</p>
+          </section>
+
+          <section class="help-section">
+            <h3>Safety Tips</h3>
+            <ul>
+              <li>Always observe traffic laws and safety regulations</li>
+              <li>Play only in public spaces - no trespassing</li>
+              <li>Runners are caught by photo, not physical contact</li>
+              <li>Respect others' privacy - keep photos within your game group</li>
+              <li>Stay aware of your surroundings at all times</li>
+              <li>Keep communication methods available for emergencies</li>
+            </ul>
+          </section>
+
+          <div class="help-footer">
+            <button class="primary-btn" onclick="window.history.back()">Back to Game</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

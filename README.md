@@ -16,41 +16,37 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 
 ### Teams
 
-- **Hunters**: Track and intercept Runners
-- **Runners**: Navigate to target locations while evading capture
+- **Hunters**: Track and intercept Runners by taking their photo. Must keep the app open at all times to share their location.
+- **Runners**: Navigate through progressively smaller zones to reach their unique final target while evading capture.
 
-### Basic Setup
+### How the Game Works
 
-- Play area: Approximately 5km radius from a central point
-- Duration: User-defined time limit set at start of game
-- Players needed: Minimum 4 (2 per team initially)
+**Play Area Setup:**
+- Hunters select a central location for the play area (typically the starting location)
+- Each Runner gets a unique final target zone, randomly placed within a radius of the central location
+- This makes the game about staying hidden nearby rather than traveling long distances
 
-### Location Tracking
+**For Runners:**
+- Navigate through a series of nested zones that progressively reveal your final target
+- When a new zone first appears, it starts **locked** for a short configurable time
+- Once unlocked, you can capture it to reveal the next zone (which will also start locked)
+- A countdown shows when the current zone unlocks, and progress indicators show zones remaining
+- Your location pings to Hunters every 30 seconds while the app is open
+- You can see where other Runners and Hunters have pinged on the map
+- **Strategy:** If you're already in a locked zone, lay low and wait before reopening the app to capture it
+- **Warning:** Taking too long between pings gives Hunters time to catch other Runners, who then join the hunt for you
 
-- Runners must use the webapp to view their target locations
-- Each time a Runner opens the webapp, their location is pinged to Hunters
-- While the webapp remains open, location pings continue every 30 seconds
-- Hunters can track Runners' locations in real-time on their devices
+**For Hunters:**
+- Keep your app open at all times to share your location and coordinate with your team
+- Track Runner locations in real-time as they ping
+- See the location history of all Runners on your map
+- Catch Runners by taking their photo (share proof in your group chat!)
+- Caught Runners become Hunters, growing your team
 
-### Target Discovery
+### Winning
 
-1. Runners initially see a 2km radius circle containing their target
-2. Upon entering this circle, a 1km radius circle appears
-3. The circle continues to halve (500m, 250m, 125m)
-4. Target is considered reached when a Runner enters the 125m circle
-5. Inner circles aren't centered within outer circles - requires checking the app
-
-### Catching Mechanics
-
-- Hunters catch Runners by physically tagging them
-- If one Runner is caught, they become a Hunter
-- Caught Runners join the pursuit as Hunters
-
-### Scoring & Winning
-
-- Teams earn points for each target location reached
-- When time expires, the team with the most points wins
-- If all Runners are caught before time expires, Hunters win
+- **Runners win individually:** Each Runner who reaches their final target zone is marked as having "won" - multiple Runners can win!
+- **Hunters win as a team:** If all Runners are caught before any reach their final target, Hunters win together
 
 ## Installation and Setup
 
@@ -105,5 +101,8 @@ To allow other devices to connect to your server over the internet, you'll need 
 
 - All players must observe traffic laws and safety regulations
 - The game should only be played in public spaces (no trespassing)
+- Runners are caught by Hunters taking their photo (not physical contact)
+- Respect others' privacy when taking photos - keep them within your game group
 - Consider weather conditions and player fitness levels
 - Ensure players have communication methods for emergencies
+- Stay aware of your surroundings at all times

@@ -31,11 +31,14 @@ function setupAllEventListeners() {
     UI.showScreen("join-room-screen");
   });
 
+  document.getElementById("help-btn").addEventListener("click", () => {
+    window.location.href = "help.html";
+  });
+
   // Back buttons
   document.querySelectorAll(".back-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       UI.showScreen("splash-screen");
-      uekg;
     });
   });
 
@@ -63,6 +66,9 @@ function setupAllEventListeners() {
 
   // Lobby controls
   document.getElementById("start-game-btn").addEventListener("click", startGame);
+  document.getElementById("lobby-help-btn").addEventListener("click", () => {
+    window.location.href = "help.html";
+  });
   document.getElementById("leave-lobby-btn").addEventListener("click", leaveLobby);
   document.getElementById("delete-lobby-btn").addEventListener("click", deleteLobby);
   document.getElementById("return-game-btn").addEventListener("click", returnToActiveGame);

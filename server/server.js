@@ -114,6 +114,11 @@ app.use("/api", apiRouter);
 const socketManager = require("./socket/socketManager");
 socketManager(io, db);
 
+// Serve help page
+app.get("/help.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "../public/help.html"));
+});
+
 // Catch-all route to serve the main application
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "../public/index.html"));
