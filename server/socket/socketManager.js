@@ -334,19 +334,26 @@ module.exports = function (io, db) {
               });
             });
 
-            // If player has no active targets, generate one
+            // If player has no active targets, generate one (but only if they haven't won)
             if (activeTargets.length === 0) {
-              console.log(`Player ${playerId} has no active targets, generating one`);
-              const newTarget = await generateTargetForPlayer(roomId, playerId, lat, lng);
+              // Check if player has already won
+              const player = await getPlayerById(playerId);
+              
+              if (player && player.status === "won") {
+                console.log(`Player ${playerId} has already won, not generating new target`);
+              } else {
+                console.log(`Player ${playerId} has no active targets, generating one`);
+                const newTarget = await generateTargetForPlayer(roomId, playerId, lat, lng);
 
-              if (newTarget) {
-                console.log(`New target ${newTarget.targetId} generated for player ${playerId}`);
+                if (newTarget) {
+                  console.log(`New target ${newTarget.targetId} generated for player ${playerId}`);
 
-                // Notify just this player about the new target
-                socket.emit("new_target", {
-                  target: newTarget,
-                  gameState: await getGameState(roomId, playerId),
-                });
+                  // Notify just this player about the new target
+                  socket.emit("new_target", {
+                    target: newTarget,
+                    gameState: await getGameState(roomId, playerId),
+                  });
+                }
               }
             }
           }
@@ -972,6 +979,13 @@ module.exports = function (io, db) {
 
   async function generateTargetForPlayer(roomId, playerId, playerLat, playerLng) {
     console.log(`Generating target for player ${playerId} in room ${roomId}`);
+
+    // Check if player has already won
+    const player = await getPlayerById(playerId);
+    if (player && player.status === "won") {
+      console.log(`Player ${playerId} has already won, not generating new target`);
+      return null;
+    }
 
     // Get room info for central location and game boundary
     const room = await new Promise((resolve, reject) => {
