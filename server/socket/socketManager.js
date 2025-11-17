@@ -52,8 +52,10 @@ module.exports = function (io, db) {
             // Player exists, reconnect
             playerId = player.player_id;
 
-            // Update player status
-            await updatePlayerStatus(playerId, "lobby");
+            // Update player status only if they haven't won or been caught
+            if (player.status !== "won" && player.status !== "caught") {
+              await updatePlayerStatus(playerId, "lobby");
+            }
           } else {
             // New player joining existing room
             playerId = uuidv4();
