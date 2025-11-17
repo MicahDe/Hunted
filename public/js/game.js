@@ -44,6 +44,9 @@ const Game = {
     // Initialize UI
     this.initGameUI();
 
+    // Initialize voice chat system
+    this.initVoiceChat();
+
     // Start location timer
     this.startLocationTimer();
 
@@ -82,6 +85,76 @@ const Game = {
     // Update player lists in menu
     if (this.gameState.players) {
       UI.updateGamePlayerLists(this.gameState.players);
+    }
+  },
+
+  // Initialize voice chat system
+  initVoiceChat: function () {
+    console.log("Initializing voice chat system...");
+
+    // Check if voice chat modules are available
+    if (typeof VoiceChat === 'undefined' || typeof PTTButton === 'undefined' || typeof SpeakerIndicator === 'undefined') {
+      console.warn("Voice chat modules not available");
+      return;
+    }
+
+    try {
+      // Check browser support first
+      const support = VoiceChat.checkBrowserSupport();
+      
+      if (!support.isSupported) {
+        // Show notification to user about unsupported browser
+        const missingFeatures = support.missing.join(', ');
+        
+        // Check if the issue is HTTPS requirement
+        const isHttps = window.location.protocol === 'https:';
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        
+        let errorMessage = `Voice chat not supported. Missing: ${missingFeatures}`;
+        
+        // If getUserMedia is missing and not on HTTPS, that's likely the issue
+        if (support.missing.includes('getUserMedia API') && !isHttps && !isLocalhost) {
+          errorMessage = 'Voice chat requires HTTPS connection. Please access the site via HTTPS to use voice features.';
+        }
+        
+        UI.showNotification(errorMessage, 'warning');
+        console.warn("Voice chat not supported:", support.missing);
+        console.warn("Protocol:", window.location.protocol, "Hostname:", window.location.hostname);
+        return;
+      }
+
+      // Initialize voice chat manager with socket and game state
+      const voiceChatInitialized = VoiceChat.init(this.socket, this.gameState);
+      
+      if (!voiceChatInitialized) {
+        console.warn("Voice chat initialization failed - browser may not support required features");
+        UI.showNotification("Voice chat could not be initialized", "warning");
+        return;
+      }
+
+      // Initialize PTT button
+      PTTButton.init();
+
+      // Initialize speaker indicator
+      SpeakerIndicator.init();
+
+      // Initialize player list indicator
+      if (typeof PlayerListIndicator !== 'undefined') {
+        PlayerListIndicator.init();
+      }
+
+      console.log("Voice chat system initialized successfully");
+      
+      // Load saved settings from localStorage (already done in VoiceChat.init)
+      const status = VoiceChat.getStatus();
+      console.log("Voice chat settings loaded:", {
+        enabled: status.isEnabled,
+        volume: status.volume
+      });
+
+    } catch (error) {
+      console.error("Error initializing voice chat:", error);
+      UI.showNotification("Voice chat initialization error", "error");
     }
   },
 
@@ -336,6 +409,9 @@ const Game = {
     // Stop location tracking
     GameMap.stopLocationTracking();
 
+    // Clean up voice chat resources
+    this.cleanupVoiceChat();
+
     // Show appropriate game over message
     let gameOverMessage;
     if (reason === "caught") {
@@ -347,6 +423,41 @@ const Game = {
     }
 
     UI.showNotification(gameOverMessage, "info");
+  },
+
+  // Clean up voice chat resources
+  cleanupVoiceChat: function () {
+    console.log("Cleaning up voice chat...");
+
+    try {
+      // Stop any active transmission
+      if (typeof VoiceChat !== 'undefined' && VoiceChat.isTransmitting) {
+        VoiceChat.stopTransmission();
+      }
+
+      // Release microphone stream and clear audio queue
+      if (typeof VoiceChat !== 'undefined' && VoiceChat.cleanup) {
+        VoiceChat.cleanup();
+      }
+
+      // Clean up UI components
+      if (typeof PTTButton !== 'undefined' && PTTButton.cleanup) {
+        PTTButton.cleanup();
+      }
+
+      if (typeof SpeakerIndicator !== 'undefined' && SpeakerIndicator.cleanup) {
+        SpeakerIndicator.cleanup();
+      }
+
+      if (typeof PlayerListIndicator !== 'undefined' && PlayerListIndicator.cleanup) {
+        PlayerListIndicator.cleanup();
+      }
+
+      console.log("Voice chat cleanup complete");
+    } catch (error) {
+      console.error("Error cleaning up voice chat:", error);
+      // Continue with game end even if cleanup fails
+    }
   },
 
   // Get current game state

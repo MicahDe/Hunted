@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require("uuid");
 const geoUtils = require("../../shared/utils/geoUtils");
 const config = require("../config/default");
+const voiceChatHandler = require("./voiceChatHandler");
 
 module.exports = function (io, db) {
   // Track connected users
@@ -8,6 +9,9 @@ module.exports = function (io, db) {
 
   io.on("connection", (socket) => {
     console.log(`Socket connected: ${socket.id}`);
+
+    // Initialize voice chat handler for this socket connection
+    voiceChatHandler(io, socket, connectedPlayers);
 
     // Create a room
     socket.on("create_room", async (data) => {

@@ -76,10 +76,32 @@ function setupAllEventListeners() {
   // Game controls
   document.getElementById("menu-btn").addEventListener("click", () => {
     document.getElementById("game-menu").classList.add("open");
+    // Update voice chat settings display when menu opens
+    updateVoiceChatSettingsDisplay();
   });
 
   document.getElementById("close-menu-btn").addEventListener("click", () => {
     document.getElementById("game-menu").classList.remove("open");
+  });
+
+  // Voice chat settings controls
+  document.getElementById("voice-chat-toggle").addEventListener("change", (e) => {
+    if (typeof VoiceChat !== 'undefined') {
+      VoiceChat.setEnabled(e.target.checked);
+      console.log(`Voice chat ${e.target.checked ? 'enabled' : 'disabled'}`);
+    }
+  });
+
+  document.getElementById("voice-volume").addEventListener("input", (e) => {
+    const volumePercent = parseInt(e.target.value);
+    const volumeLevel = volumePercent / 100;
+    
+    if (typeof VoiceChat !== 'undefined') {
+      VoiceChat.setVolume(volumeLevel);
+    }
+    
+    // Update volume display
+    document.getElementById("voice-volume-value").textContent = `${volumePercent}%`;
   });
 
   document.getElementById("center-map-btn").addEventListener("click", () => {
@@ -163,6 +185,11 @@ function setupSocketConnection() {
   socket.on("target_radius_update", handleTargetRadiusUpdate);
   socket.on("zone_activated", handleZoneActivated);
   socket.on("runner_won", handleRunnerWon);
+
+  // Voice chat events
+  socket.on("voice_transmission_started", handleVoiceTransmissionStarted);
+  socket.on("voice_audio_received", handleVoiceAudioReceived);
+  socket.on("voice_transmission_ended", handleVoiceTransmissionEnded);
 }
 
 // Check for existing session
@@ -775,6 +802,127 @@ function handleRunnerWon(data) {
 
   // Request updated game state
   socket.emit("resync_game_state", { roomId: gameState.roomId });
+}
+
+// Handle voice transmission started event
+function handleVoiceTransmissionStarted(data) {
+  try {
+    console.log("Voice transmission started:", data);
+    
+    // Update speaker indicator
+    if (typeof SpeakerIndicator !== 'undefined' && SpeakerIndicator.onTransmissionStarted) {
+      SpeakerIndicator.onTransmissionStarted(data);
+    }
+    
+    // Update player list indicator
+    if (typeof PlayerListIndicator !== 'undefined' && PlayerListIndicator.showSpeaking) {
+      PlayerListIndicator.showSpeaking(data.playerId);
+    }
+  } catch (error) {
+    console.error("Error handling voice transmission started:", error);
+    // Game continues despite voice chat error
+  }
+}
+
+// Handle voice audio received event
+function handleVoiceAudioReceived(data) {
+  try {
+    console.log("Voice audio received from:", data.username);
+    
+    // Debug: Check what we actually received
+    if (data.audioData) {
+      const dataType = Object.prototype.toString.call(data.audioData);
+      const dataSize = data.audioData.byteLength || data.audioData.size || 0;
+      console.log(`Audio data type: ${dataType}, size: ${dataSize} bytes, seq: ${data.sequenceNumber}`);
+      
+      // Check if it's an empty object (Socket.IO serialization issue)
+      if (dataType === '[object Object]' && !data.audioData.byteLength) {
+        console.error('Audio data received as plain object instead of ArrayBuffer - Socket.IO serialization issue');
+      }
+    } else {
+      console.error('No audioData field in received data');
+    }
+    
+    // Pass audio to voice chat system
+    if (typeof VoiceChat !== 'undefined' && VoiceChat.handleIncomingAudio) {
+      VoiceChat.handleIncomingAudio(data);
+    }
+    
+    // Update speaker indicator
+    if (typeof SpeakerIndicator !== 'undefined' && SpeakerIndicator.onAudioReceived) {
+      SpeakerIndicator.onAudioReceived(data);
+    }
+    
+    // Update player list indicator
+    if (typeof PlayerListIndicator !== 'undefined' && PlayerListIndicator.showSpeaking) {
+      PlayerListIndicator.showSpeaking(data.playerId);
+    }
+  } catch (error) {
+    console.error("Error handling voice audio received:", error);
+    // Game continues despite voice chat error
+  }
+}
+
+// Handle voice transmission ended event
+function handleVoiceTransmissionEnded(data) {
+  try {
+    console.log("Voice transmission ended:", data);
+    
+    // Handle transmission end in voice chat (play accumulated audio)
+    if (typeof VoiceChat !== 'undefined' && VoiceChat.handleTransmissionEnded) {
+      VoiceChat.handleTransmissionEnded(data);
+    }
+    
+    // Update speaker indicator
+    if (typeof SpeakerIndicator !== 'undefined' && SpeakerIndicator.onTransmissionEnded) {
+      SpeakerIndicator.onTransmissionEnded(data);
+    }
+    
+    // Update player list indicator
+    if (typeof PlayerListIndicator !== 'undefined' && PlayerListIndicator.hideSpeaking) {
+      PlayerListIndicator.hideSpeaking(data.playerId);
+    }
+  } catch (error) {
+    console.error("Error handling voice transmission ended:", error);
+    // Game continues despite voice chat error
+  }
+}
+
+// Update voice chat settings display when menu opens
+function updateVoiceChatSettingsDisplay() {
+  try {
+    if (typeof VoiceChat === 'undefined') {
+      console.warn('VoiceChat not available');
+      return;
+    }
+
+    // Get current settings from VoiceChat
+    const isEnabled = VoiceChat.getEnabled();
+    const volume = VoiceChat.getVolume();
+    const volumePercent = Math.round(volume * 100);
+
+    // Update toggle switch
+    const toggleElement = document.getElementById('voice-chat-toggle');
+    if (toggleElement) {
+      toggleElement.checked = isEnabled;
+    }
+
+    // Update volume slider and display
+    const volumeSlider = document.getElementById('voice-volume');
+    const volumeDisplay = document.getElementById('voice-volume-value');
+    
+    if (volumeSlider) {
+      volumeSlider.value = volumePercent;
+    }
+    
+    if (volumeDisplay) {
+      volumeDisplay.textContent = `${volumePercent}%`;
+    }
+
+    console.log('Voice chat settings display updated:', { isEnabled, volumePercent });
+  } catch (error) {
+    console.error('Error updating voice chat settings display:', error);
+  }
 }
 
 document.addEventListener("DOMContentLoaded", initApp);

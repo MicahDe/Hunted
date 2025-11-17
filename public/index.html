@@ -29,6 +29,7 @@
     <!-- Internal CSS -->
     <link rel="stylesheet" href="css/variables.css" />
     <link rel="stylesheet" href="css/main.css" />
+    <link rel="stylesheet" href="css/voiceChat.css" />
 
     <!-- Manifest for PWA -->
     <link rel="manifest" href="manifest.json" />
@@ -278,6 +279,31 @@
           </div>
         </div>
 
+        <!-- Push-to-Talk Button -->
+        <button id="ptt-btn" class="ptt-button" aria-label="Push to Talk">
+          <svg class="mic-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 14C13.66 14 15 12.66 15 11V5C15 3.34 13.66 2 12 2C10.34 2 9 3.34 9 5V11C9 12.66 10.34 14 12 14Z" fill="currentColor"/>
+            <path d="M17 11C17 13.76 14.76 16 12 16C9.24 16 7 13.76 7 11H5C5 14.53 7.61 17.43 11 17.92V21H13V17.92C16.39 17.43 19 14.53 19 11H17Z" fill="currentColor"/>
+          </svg>
+          <span class="ptt-label">Push to Talk</span>
+        </button>
+
+        <!-- Speaker Indicator Overlay -->
+        <div id="speaker-indicator" class="speaker-indicator hidden" aria-live="polite">
+          <div class="speaker-content">
+            <svg class="speaker-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M3 9V15H7L12 20V4L7 9H3Z" fill="currentColor"/>
+              <path class="wave wave-1" d="M14 8.5C14.5 9 15 10 15 12C15 14 14.5 15 14 15.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path class="wave wave-2" d="M16 6C17 7 18 9 18 12C18 15 17 17 16 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path class="wave wave-3" d="M18 4C19.5 5.5 21 8 21 12C21 16 19.5 18.5 18 20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <div class="speaker-info">
+              <span class="speaker-name"></span>
+              <span class="speaker-team"></span>
+            </div>
+          </div>
+        </div>
+
         <!-- Game Menu (initially hidden) -->
         <div id="game-menu" class="game-menu">
           <div class="menu-header">
@@ -295,6 +321,25 @@
                 <div class="team-column">
                   <h5 class="runner-title">Runners</h5>
                   <ul id="game-runner-list" class="player-list"></ul>
+                </div>
+              </div>
+            </div>
+            <div class="menu-section">
+              <h4>Voice Chat</h4>
+              <div class="voice-chat-settings">
+                <div class="setting-row">
+                  <label for="voice-chat-toggle">Enable Voice Chat</label>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="voice-chat-toggle" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="setting-row">
+                  <label for="voice-volume">Volume</label>
+                  <div class="volume-control">
+                    <input type="range" id="voice-volume" min="0" max="100" value="100">
+                    <span id="voice-volume-value">100%</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -370,6 +415,12 @@
     <script src="../shared/utils/geoUtils.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/map.js"></script>
+    <script src="js/audioCapture.js"></script>
+    <script src="js/audioPlayback.js"></script>
+    <script src="js/voiceChat.js"></script>
+    <script src="js/pttButton.js"></script>
+    <script src="js/speakerIndicator.js"></script>
+    <script src="js/playerListIndicator.js"></script>
     <script src="js/game.js"></script>
     <script src="js/app.js"></script>
   </body>

@@ -1,0 +1,993 @@
+/**
+ * Voice Chat Styles for HUNTED Game
+ * Styles for PTT button, speaker indicators, and voice chat UI
+ */
+
+/* ===========================
+   Push-to-Talk Button
+   =========================== */
+
+.ptt-button {
+    position: fixed;
+    bottom: 80px;
+    right: 20px;
+    display: none;
+    /* Hidden by default, shown only on game screen */
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px 20px;
+    background-color: var(--color-surface-variant);
+    border: 2px solid var(--color-border);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-lg);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: all var(--transition-fast) ease;
+    z-index: var(--z-index-above);
+    min-width: 80px;
+    min-height: 80px;
+}
+
+/* Show PTT button only on game screen */
+#game-screen.active .ptt-button {
+    display: flex;
+}
+
+/* PTT Button Icon */
+.ptt-button .mic-icon {
+    width: 32px;
+    height: 32px;
+    color: var(--color-text-primary);
+    transition: all var(--transition-fast) ease;
+}
+
+/* PTT Button Label */
+.ptt-button .ptt-label {
+    font-size: var(--font-size-xs);
+    font-family: var(--font-family-mono);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+    text-align: center;
+    line-height: 1.2;
+    transition: color var(--transition-fast) ease;
+}
+
+/* ===========================
+   PTT Button States
+   =========================== */
+
+/* Idle State (default) */
+.ptt-button.ptt-idle {
+    background-color: var(--color-surface-variant);
+    border-color: var(--color-border);
+}
+
+.ptt-button.ptt-idle:hover {
+    background-color: var(--color-surface);
+    border-color: var(--color-secondary);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+.ptt-button.ptt-idle:active {
+    transform: translateY(0);
+}
+
+/* Active State (transmitting) */
+.ptt-button.ptt-active {
+    background-color: var(--color-error);
+    border-color: var(--color-error);
+    animation: ptt-pulse 1.5s ease-in-out infinite;
+    transform: scale(1.05);
+}
+
+.ptt-button.ptt-active .mic-icon {
+    color: var(--color-text-on-dark);
+    animation: ptt-icon-pulse 1s ease-in-out infinite;
+}
+
+.ptt-button.ptt-active .ptt-label {
+    color: var(--color-text-on-dark);
+    font-weight: var(--font-weight-bold);
+}
+
+/* Disabled State */
+.ptt-button.ptt-disabled {
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.ptt-button.ptt-disabled .mic-icon {
+    color: var(--color-text-tertiary);
+}
+
+.ptt-button.ptt-disabled .ptt-label {
+    color: var(--color-text-tertiary);
+}
+
+/* ===========================
+   PTT Button Animations
+   =========================== */
+
+@keyframes ptt-pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(208, 0, 0, 0.7);
+    }
+
+    50% {
+        box-shadow: 0 0 0 15px rgba(208, 0, 0, 0);
+    }
+}
+
+@keyframes ptt-icon-pulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.1);
+    }
+}
+
+/* ===========================
+   Responsive Design
+   =========================== */
+
+/* Mobile devices */
+@media (max-width: 768px) {
+    .ptt-button {
+        bottom: 70px;
+        right: 15px;
+        min-width: 70px;
+        min-height: 70px;
+        padding: 12px 16px;
+    }
+
+    .ptt-button .mic-icon {
+        width: 28px;
+        height: 28px;
+    }
+
+    .ptt-button .ptt-label {
+        font-size: 10px;
+    }
+}
+
+/* Small mobile devices */
+@media (max-width: 480px) {
+    .ptt-button {
+        bottom: 60px;
+        right: 10px;
+        min-width: 60px;
+        min-height: 60px;
+        padding: 10px 12px;
+        gap: 4px;
+    }
+
+    .ptt-button .mic-icon {
+        width: 24px;
+        height: 24px;
+    }
+
+    .ptt-button .ptt-label {
+        font-size: 9px;
+    }
+}
+
+/* Landscape orientation on mobile */
+@media (max-height: 500px) and (orientation: landscape) {
+    .ptt-button {
+        bottom: 10px;
+        right: 10px;
+        min-width: 50px;
+        min-height: 50px;
+        padding: 8px 10px;
+    }
+
+    .ptt-button .mic-icon {
+        width: 20px;
+        height: 20px;
+    }
+
+    .ptt-button .ptt-label {
+        display: none;
+        /* Hide label in landscape to save space */
+    }
+}
+
+/* Tablet devices */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .ptt-button {
+        bottom: 90px;
+        right: 25px;
+        min-width: 90px;
+        min-height: 90px;
+    }
+
+    .ptt-button .mic-icon {
+        width: 36px;
+        height: 36px;
+    }
+}
+
+/* Desktop devices */
+@media (min-width: 1025px) {
+    .ptt-button {
+        bottom: 100px;
+        right: 30px;
+        min-width: 100px;
+        min-height: 100px;
+        padding: 20px 24px;
+    }
+
+    .ptt-button .mic-icon {
+        width: 40px;
+        height: 40px;
+    }
+
+    .ptt-button .ptt-label {
+        font-size: var(--font-size-sm);
+    }
+}
+
+/* ===========================
+   Touch Target Optimization
+   =========================== */
+
+/* Ensure minimum touch target size for accessibility (44x44px minimum per WCAG) */
+@media (pointer: coarse) {
+    .ptt-button {
+        min-width: 70px;
+        min-height: 70px;
+        /* Add extra padding for better touch area */
+        padding: 18px 22px;
+    }
+}
+
+/* iOS-specific optimizations */
+@supports (-webkit-touch-callout: none) {
+    .ptt-button {
+        /* Prevent iOS text selection on long press */
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+        /* Prevent iOS tap highlight flash */
+        -webkit-tap-highlight-color: transparent;
+        /* Improve touch responsiveness */
+        touch-action: manipulation;
+    }
+}
+
+/* Android-specific optimizations */
+@media (pointer: coarse) and (hover: none) {
+    .ptt-button {
+        /* Improve touch responsiveness on Android */
+        touch-action: manipulation;
+        /* Prevent accidental zooming on double-tap */
+        touch-action: manipulation;
+    }
+}
+
+/* ===========================
+   High Contrast Mode Support
+   =========================== */
+
+@media (prefers-contrast: high) {
+    .ptt-button {
+        border-width: 3px;
+    }
+
+    .ptt-button.ptt-active {
+        border-width: 4px;
+    }
+}
+
+/* ===========================
+   Reduced Motion Support
+   =========================== */
+
+@media (prefers-reduced-motion: reduce) {
+
+    .ptt-button,
+    .ptt-button .mic-icon,
+    .ptt-button .ptt-label {
+        transition: none;
+        animation: none;
+    }
+
+    .ptt-button.ptt-active {
+        animation: none;
+        transform: scale(1);
+    }
+
+    .ptt-button.ptt-active .mic-icon {
+        animation: none;
+    }
+}
+
+/* ===========================
+   Focus Styles for Accessibility
+   =========================== */
+
+.ptt-button:focus-visible {
+    outline: 3px solid var(--color-secondary);
+    outline-offset: 2px;
+}
+
+/* ===========================
+   Print Styles
+   =========================== */
+
+@media print {
+    .ptt-button {
+        display: none;
+    }
+}
+
+/* ===========================
+   Speaker Indicator Overlay
+   =========================== */
+
+.speaker-indicator {
+    position: fixed;
+    top: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: none;
+    /* Hidden by default */
+    z-index: var(--z-index-modal);
+    pointer-events: none;
+    /* Don't block interactions */
+}
+
+/* Show speaker indicator only on game screen */
+#game-screen.active .speaker-indicator {
+    display: block;
+}
+
+/* Hide when has 'hidden' class */
+.speaker-indicator.hidden {
+    display: none !important;
+}
+
+/* Speaker indicator content container */
+.speaker-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background-color: rgba(0, 0, 0, 0.85);
+    border: 2px solid var(--color-secondary);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-xl);
+    backdrop-filter: blur(10px);
+    animation: speaker-fade-in 0.3s ease-out;
+}
+
+/* Speaker icon */
+.speaker-indicator .speaker-icon {
+    width: 32px;
+    height: 32px;
+    color: var(--color-secondary);
+    flex-shrink: 0;
+}
+
+/* Speaker info container */
+.speaker-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 120px;
+}
+
+/* Speaker name */
+.speaker-name {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-on-dark);
+    letter-spacing: 0.5px;
+}
+
+/* Speaker team badge */
+.speaker-team {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 2px 8px;
+    border-radius: var(--border-radius-sm);
+    display: inline-block;
+    width: fit-content;
+}
+
+/* Team-specific colors */
+.speaker-team.team-hunter {
+    background-color: var(--color-error);
+    color: var(--color-text-on-dark);
+}
+
+.speaker-team.team-runner {
+    background-color: var(--color-success);
+    color: var(--color-text-on-dark);
+}
+
+.speaker-team.team-unknown {
+    background-color: var(--color-surface-variant);
+    color: var(--color-text-secondary);
+}
+
+/* ===========================
+   Speaker Indicator Animations
+   =========================== */
+
+/* Fade in animation */
+@keyframes speaker-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Fade out animation */
+@keyframes speaker-fade-out {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+}
+
+/* Apply fade out when hiding */
+.speaker-indicator.fading-out .speaker-content {
+    animation: speaker-fade-out 0.5s ease-out forwards;
+}
+
+/* Animated wave effect for active transmission */
+.speaker-indicator .wave {
+    animation: wave-pulse 1.5s ease-in-out infinite;
+    transform-origin: center;
+}
+
+.speaker-indicator .wave-1 {
+    animation-delay: 0s;
+}
+
+.speaker-indicator .wave-2 {
+    animation-delay: 0.2s;
+}
+
+.speaker-indicator .wave-3 {
+    animation-delay: 0.4s;
+}
+
+@keyframes wave-pulse {
+
+    0%,
+    100% {
+        opacity: 0.3;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+/* ===========================
+   Player List Speaker Icons
+   =========================== */
+
+.player-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Microphone icon next to player name */
+.player-speaking-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--color-secondary);
+    flex-shrink: 0;
+    animation: player-mic-pulse 1s ease-in-out infinite;
+}
+
+/* Hunter team speaking icon */
+.player-item.team-hunter .player-speaking-icon {
+    color: var(--color-error);
+}
+
+/* Runner team speaking icon */
+.player-item.team-runner .player-speaking-icon {
+    color: var(--color-success);
+}
+
+@keyframes player-mic-pulse {
+
+    0%,
+    100% {
+        opacity: 0.6;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.1);
+    }
+}
+
+/* ===========================
+   Responsive Design
+   =========================== */
+
+/* Mobile devices */
+@media (max-width: 768px) {
+    .speaker-indicator {
+        top: 60px;
+    }
+
+    .speaker-content {
+        padding: 10px 16px;
+        gap: 10px;
+    }
+
+    .speaker-indicator .speaker-icon {
+        width: 28px;
+        height: 28px;
+    }
+
+    .speaker-info {
+        min-width: 100px;
+    }
+
+    .speaker-name {
+        font-size: var(--font-size-sm);
+    }
+
+    .speaker-team {
+        font-size: 10px;
+    }
+}
+
+/* Small mobile devices */
+@media (max-width: 480px) {
+    .speaker-indicator {
+        top: 50px;
+        left: 10px;
+        right: 10px;
+        transform: none;
+    }
+
+    .speaker-content {
+        padding: 8px 12px;
+        gap: 8px;
+    }
+
+    .speaker-indicator .speaker-icon {
+        width: 24px;
+        height: 24px;
+    }
+
+    .speaker-info {
+        min-width: 80px;
+    }
+
+    .speaker-name {
+        font-size: var(--font-size-xs);
+    }
+
+    .speaker-team {
+        font-size: 9px;
+        padding: 1px 6px;
+    }
+}
+
+/* Landscape orientation on mobile */
+@media (max-height: 500px) and (orientation: landscape) {
+    .speaker-indicator {
+        top: 10px;
+    }
+
+    .speaker-content {
+        padding: 6px 12px;
+    }
+
+    .speaker-indicator .speaker-icon {
+        width: 20px;
+        height: 20px;
+    }
+}
+
+/* Tablet devices */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .speaker-indicator {
+        top: 70px;
+    }
+
+    .speaker-content {
+        padding: 14px 22px;
+    }
+
+    .speaker-indicator .speaker-icon {
+        width: 30px;
+        height: 30px;
+    }
+}
+
+/* Desktop devices */
+@media (min-width: 1025px) {
+    .speaker-indicator {
+        top: 90px;
+    }
+
+    .speaker-content {
+        padding: 16px 24px;
+        gap: 14px;
+    }
+
+    .speaker-indicator .speaker-icon {
+        width: 36px;
+        height: 36px;
+    }
+
+    .speaker-info {
+        min-width: 140px;
+    }
+}
+
+/* ===========================
+   Reduced Motion Support
+   =========================== */
+
+@media (prefers-reduced-motion: reduce) {
+
+    .speaker-content,
+    .speaker-indicator .wave,
+    .player-speaking-icon {
+        animation: none;
+    }
+
+    .speaker-indicator.fading-out .speaker-content {
+        animation: none;
+        opacity: 0;
+    }
+}
+
+/* ===========================
+   High Contrast Mode Support
+   =========================== */
+
+@media (prefers-contrast: high) {
+    .speaker-content {
+        border-width: 3px;
+        background-color: rgba(0, 0, 0, 0.95);
+    }
+
+    .speaker-team {
+        border: 1px solid currentColor;
+    }
+}
+
+/* ===========================
+   Print Styles
+   =========================== */
+
+@media print {
+    .speaker-indicator {
+        display: none;
+    }
+}
+
+/* 
+===========================
+   Voice Chat Settings in Game Menu
+   =========================== */
+
+.voice-chat-settings {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4, 16px);
+}
+
+.setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--spacing-3, 12px);
+    padding: var(--spacing-3, 12px) 0;
+}
+
+.setting-row label {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-sm, 14px);
+    color: var(--color-text-primary);
+    font-weight: var(--font-weight-medium, 500);
+}
+
+/* ===========================
+   Toggle Switch
+   =========================== */
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 26px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggle-switch input[type="checkbox"] {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.toggle-slider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--color-surface);
+    border: 2px solid var(--color-border);
+    border-radius: 26px;
+    transition: all var(--transition-fast, 0.2s) ease;
+}
+
+.toggle-slider:before {
+    content: "";
+    position: absolute;
+    height: 18px;
+    width: 18px;
+    left: 2px;
+    bottom: 2px;
+    background-color: var(--color-text-secondary);
+    border-radius: 50%;
+    transition: all var(--transition-fast, 0.2s) ease;
+}
+
+/* Checked state */
+.toggle-switch input[type="checkbox"]:checked+.toggle-slider {
+    background-color: var(--color-success);
+    border-color: var(--color-success);
+}
+
+.toggle-switch input[type="checkbox"]:checked+.toggle-slider:before {
+    transform: translateX(24px);
+    background-color: var(--color-text-on-dark);
+}
+
+/* Hover state */
+.toggle-switch:hover .toggle-slider {
+    border-color: var(--color-secondary);
+}
+
+/* Focus state for accessibility */
+.toggle-switch input[type="checkbox"]:focus-visible+.toggle-slider {
+    outline: 2px solid var(--color-secondary);
+    outline-offset: 2px;
+}
+
+/* Disabled state */
+.toggle-switch input[type="checkbox"]:disabled+.toggle-slider {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ===========================
+   Volume Control
+   =========================== */
+
+.volume-control {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2, 8px);
+    flex: 1;
+    max-width: 200px;
+}
+
+/* Volume slider */
+input[type="range"]#voice-volume {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+}
+
+/* Webkit browsers (Chrome, Safari, Edge) */
+input[type="range"]#voice-volume::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--color-secondary);
+    border: 2px solid var(--color-text-on-dark);
+    cursor: pointer;
+    transition: all var(--transition-fast, 0.2s) ease;
+}
+
+input[type="range"]#voice-volume::-webkit-slider-thumb:hover {
+    background: var(--color-secondary);
+    transform: scale(1.1);
+    box-shadow: 0 0 0 4px rgba(0, 255, 0, 0.2);
+}
+
+/* Firefox */
+input[type="range"]#voice-volume::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--color-secondary);
+    border: 2px solid var(--color-text-on-dark);
+    cursor: pointer;
+    transition: all var(--transition-fast, 0.2s) ease;
+}
+
+input[type="range"]#voice-volume::-moz-range-thumb:hover {
+    background: var(--color-secondary);
+    transform: scale(1.1);
+    box-shadow: 0 0 0 4px rgba(0, 255, 0, 0.2);
+}
+
+/* Firefox track */
+input[type="range"]#voice-volume::-moz-range-track {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+}
+
+/* Focus state for accessibility */
+input[type="range"]#voice-volume:focus-visible {
+    outline: 2px solid var(--color-secondary);
+    outline-offset: 2px;
+}
+
+/* Volume percentage display */
+#voice-volume-value {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs, 12px);
+    color: var(--color-text-secondary);
+    min-width: 40px;
+    text-align: right;
+    font-weight: var(--font-weight-medium, 500);
+}
+
+/* ===========================
+   Responsive Design
+   =========================== */
+
+/* Mobile devices */
+@media (max-width: 768px) {
+    .voice-chat-settings {
+        gap: var(--spacing-3, 12px);
+    }
+
+    .setting-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--spacing-2, 8px);
+        padding: var(--spacing-2, 8px) 0;
+    }
+
+    .volume-control {
+        width: 100%;
+        max-width: none;
+    }
+
+    .toggle-switch {
+        align-self: flex-start;
+    }
+}
+
+/* Small mobile devices */
+@media (max-width: 480px) {
+    .setting-row label {
+        font-size: var(--font-size-xs, 12px);
+    }
+
+    .toggle-switch {
+        width: 44px;
+        height: 24px;
+    }
+
+    .toggle-slider:before {
+        height: 16px;
+        width: 16px;
+    }
+
+    .toggle-switch input[type="checkbox"]:checked+.toggle-slider:before {
+        transform: translateX(20px);
+    }
+
+    input[type="range"]#voice-volume {
+        height: 8px;
+    }
+
+    input[type="range"]#voice-volume::-webkit-slider-thumb {
+        width: 20px;
+        height: 20px;
+    }
+
+    input[type="range"]#voice-volume::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+    }
+}
+
+/* ===========================
+   High Contrast Mode Support
+   =========================== */
+
+@media (prefers-contrast: high) {
+    .toggle-slider {
+        border-width: 3px;
+    }
+
+    input[type="range"]#voice-volume {
+        border-width: 2px;
+    }
+
+    input[type="range"]#voice-volume::-webkit-slider-thumb {
+        border-width: 3px;
+    }
+
+    input[type="range"]#voice-volume::-moz-range-thumb {
+        border-width: 3px;
+    }
+}
+
+/* ===========================
+   Reduced Motion Support
+   =========================== */
+
+@media (prefers-reduced-motion: reduce) {
+
+    .toggle-slider,
+    .toggle-slider:before,
+    input[type="range"]#voice-volume::-webkit-slider-thumb,
+    input[type="range"]#voice-volume::-moz-range-thumb {
+        transition: none;
+    }
+}
+
+/* ===========================
+   Print Styles
+   =========================== */
+
+@media print {
+    .voice-chat-settings {
+        display: none;
+    }
+}

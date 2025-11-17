@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mobile Voice Chat Test - HUNTED</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #00ff00;
+        }
+
+        .test-section {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .test-section h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #00ccff;
+        }
+
+        .test-item {
+            padding: 10px;
+            margin-bottom: 10px;
+            background: #333;
+            border-radius: 4px;
+        }
+
+        .test-item.pass {
+            border-left: 4px solid #00ff00;
+        }
+
+        .test-item.fail {
+            border-left: 4px solid #ff0000;
+        }
+
+        .test-item.pending {
+            border-left: 4px solid #ffaa00;
+        }
+
+        button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            margin-bottom: 10px;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        button:active {
+            background: #00cc00;
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            background: #666;
+            color: #999;
+            cursor: not-allowed;
+        }
+
+        .info {
+            font-size: 14px;
+            color: #aaa;
+            margin-top: 5px;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        .status.pass {
+            background: #00ff00;
+            color: #000;
+        }
+
+        .status.fail {
+            background: #ff0000;
+            color: #fff;
+        }
+
+        .status.pending {
+            background: #ffaa00;
+            color: #000;
+        }
+
+        #log {
+            background: #000;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Mobile Voice Chat Test</h1>
+
+        <div class="test-section">
+            <h2>Device Information</h2>
+            <div class="test-item" id="device-info">
+                <div><strong>User Agent:</strong> <span id="ua"></span></div>
+                <div><strong>Platform:</strong> <span id="platform"></span></div>
+                <div><strong>Screen Size:</strong> <span id="screen"></span></div>
+                <div><strong>Touch Support:</strong> <span id="touch"></span></div>
+                <div><strong>Is Mobile:</strong> <span id="is-mobile"></span></div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>Browser Support Tests</h2>
+            <div class="test-item" id="test-getusermedia">
+                <strong>getUserMedia API</strong>
+                <span class="status pending" id="status-getusermedia">Testing...</span>
+            </div>
+            <div class="test-item" id="test-mediarecorder">
+                <strong>MediaRecorder API</strong>
+                <span class="status pending" id="status-mediarecorder">Testing...</span>
+            </div>
+            <div class="test-item" id="test-webaudio">
+                <strong>Web Audio API</strong>
+                <span class="status pending" id="status-webaudio">Testing...</span>
+            </div>
+            <div class="test-item" id="test-opus">
+                <strong>Opus Codec Support</strong>
+                <span class="status pending" id="status-opus">Testing...</span>
+            </div>
+            <div class="test-item" id="test-visibility">
+                <strong>Page Visibility API</strong>
+                <span class="status pending" id="status-visibility">Testing...</span>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>Interactive Tests</h2>
+            <button id="test-mic-btn">Test Microphone Access</button>
+            <button id="test-background-btn">Test Background Transition</button>
+            <button id="test-touch-btn">Test Touch Events</button>
+            <div class="info">Tap buttons to test mobile-specific features</div>
+        </div>
+
+        <div class="test-section">
+            <h2>Console Log</h2>
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <script>
+        // Logging function
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        // Update test status
+        function updateStatus(testId, passed) {
+            const statusEl = document.getElementById(`status-${testId}`);
+            const testEl = document.getElementById(`test-${testId}`);
+            
+            if (passed) {
+                statusEl.textContent = 'PASS';
+                statusEl.className = 'status pass';
+                testEl.className = 'test-item pass';
+            } else {
+                statusEl.textContent = 'FAIL';
+                statusEl.className = 'status fail';
+                testEl.className = 'test-item fail';
+            }
+        }
+
+        // Device information
+        function displayDeviceInfo() {
+            document.getElementById('ua').textContent = navigator.userAgent;
+            document.getElementById('platform').textContent = navigator.platform;
+            document.getElementById('screen').textContent = `${window.innerWidth}x${window.innerHeight}`;
+            
+            const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+            document.getElementById('touch').textContent = hasTouch ? 'Yes' : 'No';
+            
+            const userAgent = navigator.userAgent.toLowerCase();
+            const mobileKeywords = ['android', 'webos', 'iphone', 'ipad', 'ipod', 'blackberry', 'windows phone'];
+            const isMobile = mobileKeywords.some(keyword => userAgent.includes(keyword));
+            document.getElementById('is-mobile').textContent = isMobile ? 'Yes' : 'No';
+            
+            log('Device information loaded');
+        }
+
+        // Test browser support
+        function testBrowserSupport() {
+            // Test getUserMedia
+            const hasGetUserMedia = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+            updateStatus('getusermedia', hasGetUserMedia);
+            log(`getUserMedia: ${hasGetUserMedia ? 'Supported' : 'Not supported'}`);
+
+            // Test MediaRecorder
+            const hasMediaRecorder = typeof MediaRecorder !== 'undefined';
+            updateStatus('mediarecorder', hasMediaRecorder);
+            log(`MediaRecorder: ${hasMediaRecorder ? 'Supported' : 'Not supported'}`);
+
+            // Test Web Audio API
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            const hasWebAudio = !!AudioContextClass;
+            updateStatus('webaudio', hasWebAudio);
+            log(`Web Audio API: ${hasWebAudio ? 'Supported' : 'Not supported'}`);
+
+            // Test Opus codec
+            let hasOpus = false;
+            if (hasMediaRecorder) {
+                hasOpus = MediaRecorder.isTypeSupported('audio/webm;codecs=opus');
+            }
+            updateStatus('opus', hasOpus);
+            log(`Opus codec: ${hasOpus ? 'Supported' : 'Not supported'}`);
+
+            // Test Page Visibility API
+            const hasVisibility = typeof document.hidden !== 'undefined' || 
+                                 typeof document.msHidden !== 'undefined' || 
+                                 typeof document.webkitHidden !== 'undefined';
+            updateStatus('visibility', hasVisibility);
+            log(`Page Visibility API: ${hasVisibility ? 'Supported' : 'Not supported'}`);
+        }
+
+        // Test microphone access
+        document.getElementById('test-mic-btn').addEventListener('click', async () => {
+            log('Testing microphone access...');
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                log('✓ Microphone access granted');
+                
+                // Test audio tracks
+                const tracks = stream.getAudioTracks();
+                log(`Audio tracks: ${tracks.length}`);
+                tracks.forEach((track, i) => {
+                    log(`Track ${i}: ${track.label}, enabled: ${track.enabled}`);
+                });
+                
+                // Stop tracks
+                tracks.forEach(track => track.stop());
+                log('Microphone test complete');
+            } catch (error) {
+                log(`✗ Microphone access failed: ${error.name} - ${error.message}`, 'error');
+            }
+        });
+
+        // Test background transition
+        document.getElementById('test-background-btn').addEventListener('click', () => {
+            log('Testing background transition handling...');
+            log('Switch to another app and come back to test');
+            
+            let hidden, visibilityChange;
+            if (typeof document.hidden !== 'undefined') {
+                hidden = 'hidden';
+                visibilityChange = 'visibilitychange';
+            } else if (typeof document.msHidden !== 'undefined') {
+                hidden = 'msHidden';
+                visibilityChange = 'msvisibilitychange';
+            } else if (typeof document.webkitHidden !== 'undefined') {
+                hidden = 'webkitHidden';
+                visibilityChange = 'webkitvisibilitychange';
+            }
+            
+            const handler = () => {
+                if (document[hidden]) {
+                    log('✓ App went to background');
+                } else {
+                    log('✓ App came to foreground');
+                }
+            };
+            
+            document.addEventListener(visibilityChange, handler);
+            
+            setTimeout(() => {
+                document.removeEventListener(visibilityChange, handler);
+                log('Background transition test monitoring stopped');
+            }, 30000);
+        });
+
+        // Test touch events
+        document.getElementById('test-touch-btn').addEventListener('touchstart', (e) => {
+            log(`✓ Touch start detected: ${e.touches.length} touch(es)`);
+        });
+
+        document.getElementById('test-touch-btn').addEventListener('touchend', (e) => {
+            log(`✓ Touch end detected`);
+        });
+
+        document.getElementById('test-touch-btn').addEventListener('click', (e) => {
+            log(`✓ Click event detected (fallback)`);
+        });
+
+        // Initialize
+        displayDeviceInfo();
+        testBrowserSupport();
+        log('Mobile voice chat test page loaded');
+    </script>
+</body>
+</html>

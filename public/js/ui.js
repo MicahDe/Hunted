@@ -182,7 +182,8 @@ const UI = {
     // Add hunters to list
     hunters.forEach((hunter) => {
       const listItem = document.createElement("li");
-      listItem.className = "player-item";
+      listItem.className = "player-item team-hunter";
+      listItem.setAttribute("data-player-id", hunter.playerId);
       listItem.innerHTML = `
                 <span class="player-name">${hunter.username}</span>
                 ${hunter.status === "caught" ? '<span class="player-status caught">Caught</span>' : ""}
@@ -193,13 +194,19 @@ const UI = {
     // Add runners to list
     runners.forEach((runner) => {
       const listItem = document.createElement("li");
-      listItem.className = "player-item";
+      listItem.className = "player-item team-runner";
+      listItem.setAttribute("data-player-id", runner.playerId);
       listItem.innerHTML = `
                 <span class="player-name">${runner.username}</span>
                 ${runner.status === "caught" ? '<span class="player-status caught">Caught</span>' : runner.status === "won" ? '<span class="player-status won">Won</span>' : ""}
             `;
       runnerList.appendChild(listItem);
     });
+
+    // Refresh player list indicators if available
+    if (typeof PlayerListIndicator !== "undefined" && PlayerListIndicator.refreshIndicators) {
+      PlayerListIndicator.refreshIndicators();
+    }
   },
 
   // Show team controls based on player's team
