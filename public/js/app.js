@@ -469,8 +469,8 @@ function handlePlayerDisconnected(data) {
 
 function handleRunnerLocation(data) {
   if (currentScreen === "game-screen") {
-    // Update runner marker on map
-    GameMap.updateRunnerLocation(data);
+    // Update player marker on map
+    GameMap.updateOtherPlayerLocation(data);
   }
 }
 

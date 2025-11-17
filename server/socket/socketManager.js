@@ -247,21 +247,19 @@ module.exports = function (io, db) {
           // Get location history for this player
           const locationHistory = await getPlayerLocationHistory(playerId);
 
-          // Get all hunters in the room
-          const hunters = await getTeamPlayers(roomId, "hunter");
-
-          // Broadcast runner location to all hunters in the room
+          // Broadcast runner location to all players in the room
           const locationData = {
             playerId,
             username,
-            lat,
-            lng,
-            timestamp: Date.now(),
+            team: "runner",
+            location: {
+              lat,
+              lng,
+            },
+            lastPingTime: Date.now(),
             locationHistory: locationHistory, // Include history
           };
 
-          // Instead of trying to send to each hunter by player_id (which is not a socket ID),
-          // broadcast to the whole room. Clients will filter based on their team.
           io.to(roomId).emit("runner_location", locationData);
 
           // Check for target discovery for runners
@@ -327,7 +325,6 @@ module.exports = function (io, db) {
               });
             }
           }
-
           // If player has no active targets, generate one
           else if (targetResult === null) {
             const activeTargets = await new Promise((resolve, reject) => {
@@ -353,6 +350,20 @@ module.exports = function (io, db) {
               }
             }
           }
+        } else if (team === "hunter") {
+          const locationData = {
+            playerId,
+            username,
+            team: "hunter",
+            location: {
+              lat,
+              lng,
+            },
+            lastPingTime: Date.now(),
+            locationHistory: null,
+          };
+          
+          io.to(roomId).emit("runner_location", locationData);
         }
       } catch (error) {
         console.error("Error handling location update:", error);
@@ -606,8 +617,22 @@ module.exports = function (io, db) {
     return new Promise((resolve, reject) => {
       db.all("SELECT lat, lng, timestamp FROM location_history WHERE player_id = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT 20", [playerId, thirtyMinutesAgo], function (err, rows) {
         if (err) reject(err);
-        // Reverse to get chronological order after using DESC with LIMIT
-        resolve((rows || []).reverse());
+        
+        // Filter out points less than 20 seconds apart and limit to 5
+        const filtered = [];
+        let lastTimestamp = null;
+        
+        for (const row of rows || []) {
+          if (lastTimestamp === null || (lastTimestamp - row.timestamp) >= 20000) {
+            filtered.push(row);
+            lastTimestamp = row.timestamp;
+            
+            if (filtered.length >= 5) break;
+          }
+        }
+        
+        // Reverse to get chronological order
+        resolve(filtered.reverse());
       });
     });
   }
@@ -674,9 +699,12 @@ module.exports = function (io, db) {
           runnerLocationHistory[runner.player_id] = {
             playerId: runner.player_id,
             username: runner.username,
-            lat: runner.last_lat,
-            lng: runner.last_lng,
-            timestamp: runner.last_ping_time,
+            team: "runner",
+            location: {
+              lat: runner.last_lat,
+              lng: runner.last_lng,
+            },
+            lastPingTime: runner.last_ping_time,
             locationHistory: history,
           };
         }

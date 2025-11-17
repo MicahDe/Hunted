@@ -47,10 +47,18 @@ const Game = {
     // Start location timer
     this.startLocationTimer();
 
+    if (initialState.players) {
+      initialState.players.forEach((player) => {
+        if (player.playerId !== this.playerInfo.playerId) {
+          GameMap.updateOtherPlayerLocation(player);
+        }
+      })
+    }
+
     // Initialize runner locations if available in the game state
-    if (initialState.runnerLocationHistory && gameState.team === "hunter") {
+    if (initialState.runnerLocationHistory) {
       Object.values(initialState.runnerLocationHistory).forEach((runnerData) => {
-        GameMap.updateRunnerLocation(runnerData);
+        GameMap.updateOtherPlayerLocation(runnerData);
       });
     }
 
