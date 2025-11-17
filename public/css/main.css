@@ -170,11 +170,9 @@ p {
   justify-content: center;
   align-items: center;
   text-align: center;
-  background: linear-gradient(
-    135deg,
-    var(--color-primary-dark),
-    var(--color-primary)
-  );
+  background: linear-gradient(135deg,
+      var(--color-primary-dark),
+      var(--color-primary));
   color: var(--color-text-on-dark);
   position: relative;
   overflow: hidden;
@@ -220,7 +218,7 @@ p {
 
   /* Fix extra space at end of word due to letter spacing */
   text-indent: -0.2em;
-  direction:rtl;
+  direction: rtl;
 
 }
 
@@ -425,6 +423,7 @@ textarea:focus {
   /* box-shadow: 0 0 0 2px rgba(42, 57, 144, 0.2); */
   color: white;
 }
+
 .team-btn.selected img {
   filter: brightness(0) invert(1);
 }
@@ -931,6 +930,7 @@ textarea:focus {
   0% {
     transform: rotate(0deg);
   }
+
   100% {
     transform: rotate(360deg);
   }
@@ -988,6 +988,11 @@ textarea:focus {
 
 .leaflet-bar a {
   border-radius: 0 !important;
+}
+
+.map-marker-player {
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+  border-radius: 50%;
 }
 
 /* Map Markers */
@@ -1080,7 +1085,8 @@ textarea:focus {
 
 .map-circle-target-level-125 {
   opacity: 0.9;
-  z-index: 1000; /* Make sure innermost circles appear on top */
+  z-index: 1000;
+  /* Make sure innermost circles appear on top */
 }
 
 .time-indicator {
@@ -1178,7 +1184,7 @@ textarea:focus {
 }
 
 /* Hunter and Runner UI elements */
-.hunter-title, 
+.hunter-title,
 .map-player-popup-hunter,
 .hunter-team,
 .player-score-item.hunter {
@@ -1233,7 +1239,15 @@ textarea:focus {
 }
 
 @keyframes blink {
-  0% { opacity: 1; }
-  50% { opacity: 0.7; }
-  100% { opacity: 1; }
+  0% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+
+  100% {
+    opacity: 1;
+  }
 }

@@ -532,7 +532,7 @@ const GameMap = {
         // Create a new divIcon with updated content
         const updatedIcon = L.divIcon({
           className: "runner-label-container",
-          html: `<div class="runner-label">Seen: ${timeElapsedText} ago</div>`,
+          html: `<div class="runner-label">${username}: ${timeElapsedText} ago</div>`,
           iconSize: [100, 40],
           iconAnchor: [50, -15],
         });
@@ -566,7 +566,7 @@ const GameMap = {
       this.runnerLabels[playerId] = L.marker([lat, lng], {
         icon: L.divIcon({
           className: "runner-label-container",
-          html: `<div class="runner-label">Seen: ${timeElapsedText} ago</div>`,
+          html: `<div class="runner-label">${username}: ${timeElapsedText} ago</div>`,
           iconSize: [100, 40],
           iconAnchor: [50, -15],
         }),
@@ -642,7 +642,7 @@ const GameMap = {
         // Create a new divIcon with updated content
         const updatedIcon = L.divIcon({
           className: "runner-label-container",
-          html: `<div class="runner-label">Seen: ${timeElapsedText} ago</div>`,
+          html: `<div class="runner-label">${username}: ${timeElapsedText} ago</div>`,
           iconSize: [100, 40],
           iconAnchor: [50, -15],
         });
@@ -676,7 +676,7 @@ const GameMap = {
       this.runnerLabels[playerId] = L.marker([lat, lng], {
         icon: L.divIcon({
           className: "runner-label-container",
-          html: `<div class="runner-label">Seen: ${timeElapsedText} ago</div>`,
+          html: `<div class="runner-label">${username}: ${timeElapsedText} ago</div>`,
           iconSize: [100, 40],
           iconAnchor: [50, -15],
         }),
@@ -743,7 +743,7 @@ const GameMap = {
             <div class="history-marker-runner" style="opacity: ${opacity}">
               <img src="assets/icons/runner.svg" alt="Runner">
             </div>
-            <div class="history-marker-label" style="opacity: ${opacity}">Seen: ${timeElapsedText} ago</div>
+            <div class="history-marker-label" style="opacity: ${opacity}">${username}: ${timeElapsedText} ago</div>
           `,
           iconSize: [50, 30],
           iconAnchor: [25, 15],
@@ -761,7 +761,7 @@ const GameMap = {
         }).addTo(this.gameMap);
 
         // Add small tooltip with more info
-        marker.bindTooltip(`${username}<br>Seen: ${timeElapsedText} ago`, {
+        marker.bindTooltip(`${username}<br>${timeElapsedText} ago`, {
           permanent: false,
           direction: "top",
           opacity: opacity,
@@ -994,7 +994,7 @@ const GameMap = {
       if (this.runnerLabels[playerId]) {
         const updatedIcon = L.divIcon({
           className: "runner-label-container",
-          html: `<div class="runner-label">Seen: ${timeElapsedText} ago</div>`,
+          html: `<div class="runner-label">${username}: ${timeElapsedText} ago</div>`,
           iconSize: [100, 40],
           iconAnchor: [50, -15],
         });
@@ -1041,7 +1041,7 @@ const GameMap = {
             <div class="history-marker-runner" style="opacity: ${opacity}">
               <img src="assets/icons/runner.svg" alt="Runner">
             </div>
-            <div class="history-marker-label" style="opacity: ${opacity}">Seen: ${timeElapsedText} ago</div>
+            <div class="history-marker-label" style="opacity: ${opacity}">${username}: ${timeElapsedText} ago</div>
           `,
           iconSize: [50, 30],
           iconAnchor: [25, 15],
@@ -1051,7 +1051,7 @@ const GameMap = {
 
         // Update tooltip
         marker.unbindTooltip();
-        marker.bindTooltip(`${username}<br>Seen: ${timeElapsedText} ago`, {
+        marker.bindTooltip(`${username}<br>${timeElapsedText} ago`, {
           permanent: false,
           direction: "top",
           opacity: opacity,
