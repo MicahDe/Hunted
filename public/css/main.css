@@ -579,7 +579,7 @@ textarea:focus {
   /*padding: 5px 10px;*/
   background-color: black;
   margin-right: var(--spacing-2);
-  padding: var(--spacing-2) var(--spacing-4);
+  padding: var(--spacing-2) var(--spacing-3);
 }
 
 .menu-btn {
@@ -938,10 +938,6 @@ textarea:focus {
 
 /* Responsive Adjustments */
 @media (min-width: 768px) {
-  .game-map {
-    /* height: var(--map-height-desktop); */
-  }
-
   .splash-buttons {
     flex-direction: row;
     max-width: 500px;
@@ -1223,6 +1219,7 @@ textarea:focus {
 #zone-status-value {
   font-weight: bold;
   font-size: var(--font-size-md);
+  white-space: nowrap;
 }
 
 #zone-status-value.zone-active {
@@ -1236,6 +1233,24 @@ textarea:focus {
 #zone-status-value.zone-countdown {
   color: #ffeb3b;
   animation: blink 1s infinite;
+}
+
+/* Zones remaining display styles */
+#zones-remaining {
+  background-color: var(--color-background-dark);
+  border-radius: var(--border-radius-sm);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  font-family: var(--font-family-mono);
+}
+
+#zones-remaining-value {
+  font-weight: bold;
+  font-size: var(--font-size-md);
+  color: #64b5f6;
+  white-space: nowrap;
 }
 
 @keyframes blink {

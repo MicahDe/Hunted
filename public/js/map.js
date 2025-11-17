@@ -54,8 +54,8 @@ const GameMap = {
     this.icons.player = L.divIcon({
       className: "map-marker-player",
       html: `<img src="assets/icons/self-location.svg" alt="Self Location">`,
-      iconSize: [24, 24],
-      iconAnchor: [12, 12],
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
     });
 
     // Runner icon
@@ -426,15 +426,6 @@ const GameMap = {
         icon: this.icons.player,
         zIndexOffset: 1000, // Make sure player is on top
       }).addTo(this.gameMap);
-
-      // Add accuracy circle
-      /*this.playerAccuracyCircle = L.circle([latitude, longitude], {
-        radius: accuracy * 0.5,
-        color: "#4cc9f0",
-        fillColor: "#4cc9f0",
-        fillOpacity: 0.2,
-        weight: 1,
-      }).addTo(this.gameMap);*/
 
       // Center map on player
       this.gameMap.setView([latitude, longitude], 16);

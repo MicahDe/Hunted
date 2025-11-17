@@ -169,13 +169,22 @@ const Game = {
     if (myTargets.length === 0) {
       zoneStatusElement.textContent = "No Zone";
       zoneStatusElement.classList.remove("zone-active", "zone-inactive", "zone-countdown");
+      this.updateZonesRemainingDisplay(null);
       return;
     }
 
     // Even if somehow there are multiple targets, just use the first one
     const target = myTargets[0];
 
-    // If zone is inactive and has an activation time, show countdown
+    // Update zones remaining display
+    this.updateZonesRemainingDisplay(target);
+
+    // Target radius levels: [2000, 1000, 500, 250, 125]
+    const radiusLevels = [2000, 1000, 500, 250, 125];
+    const currentRadiusIndex = radiusLevels.indexOf(target.radiusLevel);
+    const nextZoneNumber = currentRadiusIndex + 2; // Next zone (current is index, so +1 for next, +1 for 1-based)
+
+    // If zone is inactive and has an activation time, show countdown with next zone
     if (target.zoneStatus === "inactive" && target.activationTime) {
       const now = Date.now();
       const timeRemaining = Math.max(0, Math.floor((target.activationTime - now) / 1000));
@@ -186,7 +195,8 @@ const Game = {
         const seconds = timeRemaining % 60;
         const formattedTime = `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 
-        zoneStatusElement.textContent = `Zone: ${formattedTime}`;
+        // Show next zone with lock icon
+        zoneStatusElement.textContent = `Zone ${nextZoneNumber}: 🔒 ${formattedTime}`;
         zoneStatusElement.classList.remove("zone-active");
         zoneStatusElement.classList.add("zone-countdown");
 
@@ -200,7 +210,8 @@ const Game = {
 
     // If zone is active or should be active now
     if (target.zoneStatus === "active" || (target.activationTime && Date.now() > target.activationTime)) {
-      zoneStatusElement.textContent = "Zone: Active";
+      const nextZoneNumber = currentRadiusIndex + 2;  // Next zone (current is index, so +1 for next, +1 for 1-based)
+      zoneStatusElement.textContent = `Zone ${nextZoneNumber}: Unlocked`;
       zoneStatusElement.classList.remove("zone-inactive", "zone-countdown");
       zoneStatusElement.classList.add("zone-active");
     } else {
@@ -210,12 +221,49 @@ const Game = {
     }
   },
 
+  // Update zones remaining display for runners
+  updateZonesRemainingDisplay: function (target) {
+    const zonesRemainingElement = document.getElementById("zones-remaining-value");
+    const zonesRemainingContainer = document.getElementById("zones-remaining-container");
+    
+    if (!zonesRemainingElement || !zonesRemainingContainer) return;
+
+    if (!target) {
+      zonesRemainingContainer.style.display = "none";
+      return;
+    }
+
+    // Show the container
+    zonesRemainingContainer.style.display = "block";
+
+    // Target radius levels: [2000, 1000, 500, 250, 125]
+    const radiusLevels = [2000, 1000, 500, 250, 125];
+    const currentRadiusIndex = radiusLevels.indexOf(target.radiusLevel);
+    
+    if (currentRadiusIndex === -1) {
+      zonesRemainingElement.textContent = "-";
+      return;
+    }
+
+    // Current zone number (1-based)
+    const currentZoneNumber = currentRadiusIndex + 1;
+    const totalZones = radiusLevels.length + 1;
+
+    // Show current zone progress
+    zonesRemainingElement.textContent = `Zone ${currentZoneNumber} of ${totalZones}`;
+  },
+
   // Start zone countdown timer
   startZoneCountdown: function (target) {
     // Clear any existing timer
     if (this.timers.zoneTimer) {
       clearInterval(this.timers.zoneTimer);
     }
+
+    // Calculate next zone number
+    const radiusLevels = [2000, 1000, 500, 250, 125];
+    const currentRadiusIndex = radiusLevels.indexOf(target.radiusLevel);
+    const nextZoneNumber = currentRadiusIndex + 2; // Next zone (current is index, so +1 for next, +1 for 1-based)
 
     // Start a countdown timer
     this.timers.zoneTimer = setInterval(() => {
@@ -231,10 +279,11 @@ const Game = {
         const seconds = timeRemaining % 60;
         const formattedTime = `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 
-        zoneStatusElement.textContent = `Zone: ${formattedTime}`;
+        // Show next zone with lock icon
+        zoneStatusElement.textContent = `Zone ${nextZoneNumber}: 🔒 ${formattedTime}`;
       } else {
-        // Zone is now active
-        zoneStatusElement.textContent = "Zone: Active";
+        // Zone is now active - show the zone that just unlocked
+        zoneStatusElement.textContent = `Zone ${nextZoneNumber}: Unlocked`;
         zoneStatusElement.classList.remove("zone-inactive", "zone-countdown");
         zoneStatusElement.classList.add("zone-active");
 

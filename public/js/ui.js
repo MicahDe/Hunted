@@ -214,12 +214,5 @@ const UI = {
       hunterControls.style.display = "none";
       runnerControls.style.display = "flex";
     }
-
-    // Update team indicator
-    const teamValue = document.getElementById("team-value");
-    if (teamValue) {
-      teamValue.textContent = team.charAt(0).toUpperCase() + team.slice(1);
-      teamValue.className = team === "hunter" ? "hunter-team-text" : "runner-team-text";
-    }
   },
 };
