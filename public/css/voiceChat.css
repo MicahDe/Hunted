@@ -26,6 +26,9 @@
     user-select: none;
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    /* Pointer capture needs the browser to stop treating a press as a pan */
+    touch-action: none;
     transition: all var(--transition-fast) ease;
     z-index: var(--z-index-above);
     min-width: 80px;
@@ -94,6 +97,22 @@
 .ptt-button.ptt-active .ptt-label {
     color: var(--color-text-on-dark);
     font-weight: var(--font-weight-bold);
+}
+
+/* Connecting State (held, microphone not streaming yet) */
+.ptt-button.ptt-connecting {
+    background-color: var(--color-warning);
+    border-color: var(--color-warning);
+    transform: scale(1.02);
+}
+
+.ptt-button.ptt-connecting .mic-icon {
+    color: var(--color-text-on-dark);
+    animation: ptt-icon-pulse 0.6s ease-in-out infinite;
+}
+
+.ptt-button.ptt-connecting .ptt-label {
+    color: var(--color-text-on-dark);
 }
 
 /* Disabled State */
@@ -307,12 +326,14 @@
         animation: none;
     }
 
-    .ptt-button.ptt-active {
+    .ptt-button.ptt-active,
+    .ptt-button.ptt-connecting {
         animation: none;
         transform: scale(1);
     }
 
-    .ptt-button.ptt-active .mic-icon {
+    .ptt-button.ptt-active .mic-icon,
+    .ptt-button.ptt-connecting .mic-icon {
         animation: none;
     }
 }

@@ -123,8 +123,9 @@ const Game = {
         return;
       }
 
-      // Initialize voice chat manager with socket and game state
-      const voiceChatInitialized = VoiceChat.init(this.socket, this.gameState);
+      // Initialize voice chat manager with socket, game state and who we are
+      // (the local player id lets it ignore its own transmissions echoed back)
+      const voiceChatInitialized = VoiceChat.init(this.socket, this.gameState, this.playerInfo);
       
       if (!voiceChatInitialized) {
         console.warn("Voice chat initialization failed - browser may not support required features");

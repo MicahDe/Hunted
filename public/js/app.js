@@ -503,6 +503,12 @@ function handlePlayerJoined(data) {
 function handlePlayerDisconnected(data) {
   console.log("Player disconnected:", data);
   UI.showNotification(`${data.username} disconnected`, "info");
+
+  // Stop and forget any voice audio still queued for them
+  if (typeof VoiceChat !== "undefined" && VoiceChat.handlePlayerLeft) {
+    VoiceChat.handlePlayerLeft(data.playerId);
+  }
+
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
 
@@ -805,18 +811,11 @@ function handleRunnerWon(data) {
 }
 
 // Handle voice transmission started event
+// VoiceChat owns the speaker indicators, so they follow what is actually heard
 function handleVoiceTransmissionStarted(data) {
   try {
-    console.log("Voice transmission started:", data);
-    
-    // Update speaker indicator
-    if (typeof SpeakerIndicator !== 'undefined' && SpeakerIndicator.onTransmissionStarted) {
-      SpeakerIndicator.onTransmissionStarted(data);
-    }
-    
-    // Update player list indicator
-    if (typeof PlayerListIndicator !== 'undefined' && PlayerListIndicator.showSpeaking) {
-      PlayerListIndicator.showSpeaking(data.playerId);
+    if (typeof VoiceChat !== "undefined" && VoiceChat.handleTransmissionStarted) {
+      VoiceChat.handleTransmissionStarted(data);
     }
   } catch (error) {
     console.error("Error handling voice transmission started:", error);
@@ -824,38 +823,12 @@ function handleVoiceTransmissionStarted(data) {
   }
 }
 
-// Handle voice audio received event
+// Handle an incoming audio frame. These arrive many times a second while
+// someone is talking, so this path stays quiet and does no per-frame UI work.
 function handleVoiceAudioReceived(data) {
   try {
-    console.log("Voice audio received from:", data.username);
-    
-    // Debug: Check what we actually received
-    if (data.audioData) {
-      const dataType = Object.prototype.toString.call(data.audioData);
-      const dataSize = data.audioData.byteLength || data.audioData.size || 0;
-      console.log(`Audio data type: ${dataType}, size: ${dataSize} bytes, seq: ${data.sequenceNumber}`);
-      
-      // Check if it's an empty object (Socket.IO serialization issue)
-      if (dataType === '[object Object]' && !data.audioData.byteLength) {
-        console.error('Audio data received as plain object instead of ArrayBuffer - Socket.IO serialization issue');
-      }
-    } else {
-      console.error('No audioData field in received data');
-    }
-    
-    // Pass audio to voice chat system
-    if (typeof VoiceChat !== 'undefined' && VoiceChat.handleIncomingAudio) {
+    if (typeof VoiceChat !== "undefined" && VoiceChat.handleIncomingAudio) {
       VoiceChat.handleIncomingAudio(data);
-    }
-    
-    // Update speaker indicator
-    if (typeof SpeakerIndicator !== 'undefined' && SpeakerIndicator.onAudioReceived) {
-      SpeakerIndicator.onAudioReceived(data);
-    }
-    
-    // Update player list indicator
-    if (typeof PlayerListIndicator !== 'undefined' && PlayerListIndicator.showSpeaking) {
-      PlayerListIndicator.showSpeaking(data.playerId);
     }
   } catch (error) {
     console.error("Error handling voice audio received:", error);
@@ -866,21 +839,8 @@ function handleVoiceAudioReceived(data) {
 // Handle voice transmission ended event
 function handleVoiceTransmissionEnded(data) {
   try {
-    console.log("Voice transmission ended:", data);
-    
-    // Handle transmission end in voice chat (play accumulated audio)
-    if (typeof VoiceChat !== 'undefined' && VoiceChat.handleTransmissionEnded) {
+    if (typeof VoiceChat !== "undefined" && VoiceChat.handleTransmissionEnded) {
       VoiceChat.handleTransmissionEnded(data);
-    }
-    
-    // Update speaker indicator
-    if (typeof SpeakerIndicator !== 'undefined' && SpeakerIndicator.onTransmissionEnded) {
-      SpeakerIndicator.onTransmissionEnded(data);
-    }
-    
-    // Update player list indicator
-    if (typeof PlayerListIndicator !== 'undefined' && PlayerListIndicator.hideSpeaking) {
-      PlayerListIndicator.hideSpeaking(data.playerId);
     }
   } catch (error) {
     console.error("Error handling voice transmission ended:", error);

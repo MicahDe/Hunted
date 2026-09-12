@@ -1,429 +1,634 @@
 /**
  * Audio Playback Module for HUNTED Voice Chat
- * Handles audio playback queue and Web Audio API for low-latency playback
+ *
+ * Plays incoming PCM frames as they arrive rather than waiting for the speaker
+ * to finish. Each speaker gets their own scheduling timeline and gain node, so
+ * frames play back gaplessly and two people talking at once are mixed instead
+ * of queued behind one another.
+ *
+ * Scheduling model, per speaker:
+ *   - the first frame is scheduled a small jitter buffer ahead of the clock
+ *   - each subsequent frame is scheduled exactly where the previous one ended
+ *   - if the network stalls long enough that we run dry, the timeline resyncs
+ *   - if we somehow buffer too far ahead, frames are dropped to bound latency
  */
 
-class AudioPlayback {
-  constructor(audioContext = null) {
-    // Create or use provided AudioContext
-    this.audioContext = audioContext || this.createAudioContext();
-    
-    // FIFO queue for audio chunks
-    this.queue = [];
-    
-    // Playback state
-    this.isPlaying = false;
-    this.currentSource = null;
-    
-    // Volume control (0.0 to 1.0)
-    this.volume = 1.0;
-    this.gainNode = null;
-    
-    // Initialize gain node for volume control
-    if (this.audioContext) {
-      this.gainNode = this.audioContext.createGain();
-      this.gainNode.connect(this.audioContext.destination);
-      this.gainNode.gain.value = this.volume;
-    }
-    
-    // Callbacks
-    this.onPlaybackStartCallback = null;
-    this.onPlaybackEndCallback = null;
-    this.onErrorCallback = null;
-  }
+// Wrapped so that the shared DSP names do not collide with the other
+// voice chat modules in the page's single global scope.
+(function (root) {
+  const { LinearResampler, int16ToFloat, toInt16Array } =
+    typeof AudioDSP !== 'undefined' ? AudioDSP : require('./audioDsp');
 
-  /**
-   * Create an AudioContext with browser compatibility
-   * @returns {AudioContext|null} The audio context or null if not supported
-   */
-  createAudioContext() {
-    try {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      
-      if (!AudioContextClass) {
-        console.error('Web Audio API is not supported in this browser');
+  class AudioPlayback {
+    constructor(audioContext = null, config = {}) {
+      this.config = {
+        // How far ahead of the clock the first frame of a burst is scheduled.
+        // This is the latency we trade for tolerance of network jitter.
+        jitterBufferMs: config.jitterBufferMs || 120,
+
+        // Hard ceiling on buffered audio; beyond this we drop frames rather than
+        // let the delay grow without bound.
+        maxLeadMs: config.maxLeadMs || 1000,
+
+        // Treat a speaker as finished this long after their last frame, in case
+        // the transmission-end event never arrives (sender crashed, dropped out).
+        speakerTimeoutMs: config.speakerTimeoutMs || 1500
+      };
+
+      this.audioContext = audioContext || this.createAudioContext();
+      this.ownsAudioContext = !audioContext;
+
+      // Volume control (0.0 to 1.0)
+      this.volume = 1.0;
+      this.masterGain = null;
+
+      if (this.audioContext) {
+        this.masterGain = this.audioContext.createGain();
+        this.masterGain.gain.value = this.volume;
+        this.masterGain.connect(this.audioContext.destination);
+      }
+
+      // playerId -> speaker timeline state
+      this.speakers = new Map();
+
+      // Callbacks
+      this.onSpeakerStartCallback = null;
+      this.onSpeakerEndCallback = null;
+      this.onErrorCallback = null;
+    }
+
+    /**
+     * Create an AudioContext with browser compatibility
+     * @returns {AudioContext|null} The audio context or null if not supported
+     */
+    createAudioContext() {
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+        if (!AudioContextClass) {
+          console.error('Web Audio API is not supported in this browser');
+          return null;
+        }
+
+        const context = new AudioContextClass();
+        console.log(`AudioContext created successfully (${context.sampleRate} Hz, state: ${context.state})`);
+        return context;
+      } catch (error) {
+        console.error('Failed to create AudioContext:', error);
         return null;
       }
-      
-      const context = new AudioContextClass();
-      console.log('AudioContext created successfully');
-      return context;
-      
-    } catch (error) {
-      console.error('Failed to create AudioContext:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Enqueue an audio chunk for playback
-   * @param {ArrayBuffer|Blob} audioData - The audio data to play
-   * @param {Object} metadata - Optional metadata about the audio (speaker info, timestamp, etc.)
-   */
-  enqueue(audioData, metadata = {}) {
-    if (!audioData) {
-      console.warn('Attempted to enqueue null or undefined audio data');
-      return;
     }
 
-    // Add to queue with metadata
-    this.queue.push({
-      audioData: audioData,
-      metadata: {
-        playerId: metadata.playerId || null,
-        username: metadata.username || 'Unknown',
-        team: metadata.team || null,
-        timestamp: metadata.timestamp || Date.now(),
-        sequenceNumber: metadata.sequenceNumber || 0
+    /**
+     * Get (creating if needed) the timeline state for a speaker
+     * @param {Object} metadata - Speaker metadata
+     * @returns {Object|null} Speaker state
+     */
+    getOrCreateSpeaker(metadata) {
+      const playerId = metadata && metadata.playerId;
+
+      if (!playerId || !this.audioContext) {
+        return null;
       }
-    });
 
-    console.log(`Audio chunk enqueued. Queue size: ${this.queue.length}`);
+      let speaker = this.speakers.get(playerId);
 
-    // Start playback if not already playing
-    if (!this.isPlaying) {
-      this.play();
+      if (speaker) {
+        // Refresh display metadata in case the username/team changed
+        if (metadata.username) {
+          speaker.metadata.username = metadata.username;
+        }
+        if (metadata.team) {
+          speaker.metadata.team = metadata.team;
+        }
+        return speaker;
+      }
+
+      const gain = this.audioContext.createGain();
+      gain.gain.value = 1;
+      gain.connect(this.masterGain);
+
+      speaker = {
+        playerId: playerId,
+        metadata: {
+          playerId: playerId,
+          username: metadata.username || 'Unknown',
+          team: metadata.team || 'unknown'
+        },
+        gain: gain,
+        resampler: null,
+        frameSampleRate: null,
+        // Context time at which the next frame should start; 0 means "not running"
+        nextTime: 0,
+        active: false,
+        sources: new Set(),
+        endTimer: null,
+        silenceTimer: null,
+        stats: { framesPlayed: 0, framesDropped: 0, resyncs: 0 }
+      };
+
+      this.speakers.set(playerId, speaker);
+      return speaker;
     }
-  }
 
-  /**
-   * Start playing audio from the queue
-   * Processes chunks sequentially (FIFO)
-   * @returns {Promise<void>}
-   */
-  async play() {
-    // Prevent multiple simultaneous playback loops
-    if (this.isPlaying) {
-      return;
-    }
+    /**
+     * Mark a speaker as live before any audio has arrived, so the UI can react
+     * the instant they press push-to-talk.
+     * @param {Object} metadata - {playerId, username, team}
+     */
+    noteSpeakerStart(metadata) {
+      const speaker = this.getOrCreateSpeaker(metadata);
 
-    // Check if AudioContext is available
-    if (!this.audioContext) {
-      console.error('AudioContext not available for playback');
-      return;
-    }
-
-    // Resume AudioContext if suspended (required by some browsers)
-    if (this.audioContext.state === 'suspended') {
-      try {
-        await this.audioContext.resume();
-        console.log('AudioContext resumed');
-      } catch (error) {
-        console.error('Failed to resume AudioContext:', error);
+      if (!speaker) {
         return;
       }
-    }
 
-    this.isPlaying = true;
+      // A new burst starts a fresh timeline
+      this.clearTimers(speaker);
+      speaker.nextTime = 0;
 
-    // Process queue sequentially
-    while (this.queue.length > 0) {
-      const item = this.queue.shift(); // FIFO - get first item
-      
-      try {
-        await this.playAudioChunk(item.audioData, item.metadata);
-      } catch (error) {
-        console.error('Error playing audio chunk:', error);
-        
-        // Call error callback if provided
-        if (this.onErrorCallback) {
-          this.onErrorCallback(error, item.metadata);
-        }
-        
-        // Continue with next chunk instead of stopping playback
-        continue;
+      if (speaker.resampler) {
+        speaker.resampler.reset();
       }
+
+      this.armSilenceTimer(speaker);
+      this.activate(speaker);
     }
 
-    this.isPlaying = false;
-    console.log('Playback queue empty');
-  }
+    /**
+     * Schedule one PCM frame for playback.
+     * @param {ArrayBuffer|Uint8Array|Int16Array} audioData - 16-bit mono PCM
+     * @param {Object} metadata - {playerId, username, team, sampleRate, sequenceNumber}
+     */
+    enqueue(audioData, metadata = {}) {
+      if (!this.audioContext) {
+        this.reportError(new Error('AudioContext not available for playback'), metadata);
+        return;
+      }
 
-  /**
-   * Play a single audio chunk
-   * @param {ArrayBuffer|Blob} audioData - The audio data to play
-   * @param {Object} metadata - Metadata about the audio
-   * @returns {Promise<void>}
-   */
-  async playAudioChunk(audioData, metadata = {}) {
-    return new Promise(async (resolve, reject) => {
+      const samples = toInt16Array(audioData);
+
+      if (!samples || samples.length === 0) {
+        console.warn('Ignoring empty audio frame from', metadata.username);
+        return;
+      }
+
+      const speaker = this.getOrCreateSpeaker(metadata);
+
+      if (!speaker) {
+        return;
+      }
+
       try {
-        // Convert Blob to ArrayBuffer if needed
-        let arrayBuffer;
-        if (audioData instanceof Blob) {
-          arrayBuffer = await audioData.arrayBuffer();
-        } else if (audioData instanceof ArrayBuffer) {
-          arrayBuffer = audioData;
+        const frameRate = metadata.sampleRate || 16000;
+        const contextRate = this.audioContext.sampleRate;
+
+        // Resample to the context rate with state carried between frames. Letting
+        // AudioBufferSourceNode do the conversion instead would round each frame's
+        // length independently and click at every frame boundary.
+        if (!speaker.resampler || speaker.frameSampleRate !== frameRate) {
+          speaker.resampler = new LinearResampler(frameRate, contextRate);
+          speaker.frameSampleRate = frameRate;
+        }
+
+        const floatSamples = speaker.resampler.process(int16ToFloat(samples));
+
+        if (floatSamples.length === 0) {
+          return;
+        }
+
+        const buffer = this.audioContext.createBuffer(1, floatSamples.length, contextRate);
+
+        if (buffer.copyToChannel) {
+          buffer.copyToChannel(floatSamples, 0);
         } else {
-          throw new Error('Invalid audio data type. Expected Blob or ArrayBuffer.');
+          buffer.getChannelData(0).set(floatSamples);
         }
 
-        // Validate ArrayBuffer
-        if (!arrayBuffer || arrayBuffer.byteLength === 0) {
-          const error = new Error('Empty or invalid audio data received');
-          console.error('Playback error:', error);
-          error.metadata = metadata;
-          reject(error);
+        if (!this.scheduleBuffer(speaker, buffer)) {
           return;
         }
 
-        // Store the original size before decoding (decodeAudioData may consume the buffer)
-        const originalSize = arrayBuffer.byteLength;
-        
-        // Decode audio data with enhanced error handling
-        let audioBuffer;
+        speaker.stats.framesPlayed++;
+
+        this.armSilenceTimer(speaker);
+        this.activate(speaker);
+      } catch (error) {
+        this.reportError(error, metadata);
+      }
+    }
+
+    /**
+     * Place a decoded buffer on a speaker's timeline
+     * @param {Object} speaker - Speaker state
+     * @param {AudioBuffer} buffer - Audio to play
+     * @returns {boolean} False if the frame was dropped
+     */
+    scheduleBuffer(speaker, buffer) {
+      const now = this.audioContext.currentTime;
+      const jitter = this.config.jitterBufferMs / 1000;
+      const maxLead = this.config.maxLeadMs / 1000;
+
+      // Ran dry (first frame of a burst, or a network stall): restart the
+      // timeline a jitter buffer ahead of the clock.
+      if (speaker.nextTime < now + 0.005) {
+        if (speaker.nextTime > 0) {
+          speaker.stats.resyncs++;
+        }
+        speaker.nextTime = now + jitter;
+      }
+
+      // Buffered too far ahead: drop rather than let latency creep up
+      if (speaker.nextTime - now > maxLead) {
+        speaker.stats.framesDropped++;
+        console.warn(
+          `Dropping audio frame from ${speaker.metadata.username}: ` +
+            `${Math.round((speaker.nextTime - now) * 1000)}ms already buffered`
+        );
+        return false;
+      }
+
+      const source = this.audioContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(speaker.gain);
+
+      source.onended = () => {
+        speaker.sources.delete(source);
+
         try {
-          // Clone the ArrayBuffer to prevent it from being consumed/detached
-          // Some browsers detach the ArrayBuffer during decodeAudioData
-          const clonedBuffer = arrayBuffer.slice(0);
-          audioBuffer = await this.audioContext.decodeAudioData(clonedBuffer);
-        } catch (decodeError) {
-          console.error('Audio decoding failed:', {
-            error: decodeError,
-            speaker: metadata.username,
-            sequenceNumber: metadata.sequenceNumber,
-            dataSize: originalSize
-          });
-          
-          // Provide detailed error message for debugging
-          const error = new Error('Failed to decode audio data. The audio format may be unsupported or corrupted.');
-          error.originalError = decodeError;
-          error.metadata = metadata;
-          error.errorType = 'DecodingError';
-          
-          reject(error);
-          return;
+          source.disconnect();
+        } catch (error) {
+          // Already disconnected
         }
+      };
 
-        // Validate decoded audio buffer
-        if (!audioBuffer || audioBuffer.length === 0) {
-          const error = new Error('Decoded audio buffer is empty');
-          console.error('Playback error:', error);
-          error.metadata = metadata;
-          reject(error);
-          return;
-        }
+      source.start(speaker.nextTime);
+      speaker.sources.add(source);
+      speaker.nextTime += buffer.duration;
 
-        // Create audio source
-        this.currentSource = this.audioContext.createBufferSource();
-        this.currentSource.buffer = audioBuffer;
-        
-        // Connect to gain node for volume control
-        this.currentSource.connect(this.gainNode);
+      return true;
+    }
 
-        // Handle playback end
-        this.currentSource.onended = () => {
-          console.log('Audio chunk playback completed');
-          
-          // Call playback end callback if provided
-          if (this.onPlaybackEndCallback) {
-            this.onPlaybackEndCallback(metadata);
-          }
-          
-          this.currentSource = null;
-          resolve();
-        };
+    /**
+     * Note that a speaker released push-to-talk. Their buffered audio keeps
+     * playing; the speaker is only retired once it has all been heard.
+     * @param {string} playerId
+     */
+    noteSpeakerEnd(playerId) {
+      const speaker = this.speakers.get(playerId);
 
-        // Call playback start callback if provided
-        if (this.onPlaybackStartCallback) {
-          this.onPlaybackStartCallback(metadata);
-        }
-
-        // Start playback
-        this.currentSource.start(0);
-        console.log(`Playing audio chunk from ${metadata.username || 'Unknown'} (seq: ${metadata.sequenceNumber || 'N/A'})`);
-
-      } catch (error) {
-        console.error('Unexpected error in playAudioChunk:', error);
-        error.metadata = metadata;
-        reject(error);
+      if (!speaker) {
+        return;
       }
-    });
-  }
 
-  /**
-   * Stop current playback and clear queue
-   */
-  stop() {
-    // Stop current source if playing
-    if (this.currentSource) {
+      this.clearTimers(speaker);
+
+      const remainingMs = Math.max(0, (speaker.nextTime - this.audioContext.currentTime) * 1000);
+
+      speaker.endTimer = setTimeout(() => {
+        speaker.endTimer = null;
+        this.deactivate(speaker);
+      }, remainingMs + 60);
+    }
+
+    /**
+     * Retire a speaker if no further frames arrive, covering the case where the
+     * transmission-end event is lost.
+     * @param {Object} speaker
+     */
+    armSilenceTimer(speaker) {
+      if (speaker.silenceTimer) {
+        clearTimeout(speaker.silenceTimer);
+      }
+
+      speaker.silenceTimer = setTimeout(() => {
+        speaker.silenceTimer = null;
+        console.log(`No audio from ${speaker.metadata.username} for a while, ending their turn`);
+        this.deactivate(speaker);
+      }, this.config.speakerTimeoutMs);
+    }
+
+    clearTimers(speaker) {
+      if (speaker.endTimer) {
+        clearTimeout(speaker.endTimer);
+        speaker.endTimer = null;
+      }
+
+      if (speaker.silenceTimer) {
+        clearTimeout(speaker.silenceTimer);
+        speaker.silenceTimer = null;
+      }
+    }
+
+    /**
+     * @param {Object} speaker
+     */
+    activate(speaker) {
+      if (speaker.active) {
+        return;
+      }
+
+      speaker.active = true;
+
+      if (this.onSpeakerStartCallback) {
+        this.onSpeakerStartCallback(speaker.metadata);
+      }
+    }
+
+    /**
+     * @param {Object} speaker
+     */
+    deactivate(speaker) {
+      this.clearTimers(speaker);
+      speaker.nextTime = 0;
+
+      if (!speaker.active) {
+        return;
+      }
+
+      speaker.active = false;
+
+      console.log(
+        `Speaker ${speaker.metadata.username} finished ` +
+          `(${speaker.stats.framesPlayed} frames, ${speaker.stats.framesDropped} dropped, ` +
+          `${speaker.stats.resyncs} resyncs)`
+      );
+
+      if (this.onSpeakerEndCallback) {
+        this.onSpeakerEndCallback(speaker.metadata);
+      }
+    }
+
+    /**
+     * Stop one speaker immediately, discarding anything still scheduled
+     * @param {string} playerId
+     */
+    stopSpeaker(playerId) {
+      const speaker = this.speakers.get(playerId);
+
+      if (!speaker) {
+        return;
+      }
+
+      this.stopSources(speaker);
+      this.deactivate(speaker);
+    }
+
+    /**
+     * @param {Object} speaker
+     */
+    stopSources(speaker) {
+      speaker.sources.forEach((source) => {
+        try {
+          source.onended = null;
+          source.stop();
+          source.disconnect();
+        } catch (error) {
+          // Source may already have finished
+        }
+      });
+
+      speaker.sources.clear();
+      speaker.nextTime = 0;
+    }
+
+    /**
+     * Stop all playback and clear every timeline
+     */
+    stop() {
+      this.speakers.forEach((speaker) => {
+        this.stopSources(speaker);
+        this.deactivate(speaker);
+      });
+
+      console.log('Playback stopped');
+    }
+
+    /**
+     * Drop anything still scheduled but keep the speakers registered.
+     * Used when returning from the background, where scheduled audio is stale.
+     */
+    resetTimelines() {
+      this.speakers.forEach((speaker) => {
+        this.stopSources(speaker);
+
+        if (speaker.resampler) {
+          speaker.resampler.reset();
+        }
+      });
+    }
+
+    /**
+     * Forget a speaker entirely (they left the game)
+     * @param {string} playerId
+     */
+    removeSpeaker(playerId) {
+      const speaker = this.speakers.get(playerId);
+
+      if (!speaker) {
+        return;
+      }
+
+      this.stopSources(speaker);
+      this.deactivate(speaker);
+
       try {
-        this.currentSource.stop();
-        this.currentSource.disconnect();
+        speaker.gain.disconnect();
       } catch (error) {
-        // Source may already be stopped
-        console.warn('Error stopping audio source:', error);
+        // Already disconnected
       }
-      this.currentSource = null;
+
+      this.speakers.delete(playerId);
     }
 
-    // Clear the queue
-    this.clearQueue();
+    /**
+     * Set playback volume
+     * @param {number} level - Volume level from 0.0 (mute) to 1.0 (full volume)
+     */
+    setVolume(level) {
+      this.volume = Math.max(0, Math.min(1, level));
 
-    this.isPlaying = false;
-    console.log('Playback stopped');
-  }
+      if (this.masterGain) {
+        // Ramp rather than jump, so volume changes do not click
+        const now = this.audioContext ? this.audioContext.currentTime : 0;
 
-  /**
-   * Set playback volume
-   * @param {number} level - Volume level from 0.0 (mute) to 1.0 (full volume)
-   */
-  setVolume(level) {
-    // Clamp volume between 0 and 1
-    this.volume = Math.max(0, Math.min(1, level));
-    
-    // Update gain node if available
-    if (this.gainNode) {
-      this.gainNode.gain.value = this.volume;
-      console.log(`Volume set to ${(this.volume * 100).toFixed(0)}%`);
-    }
-  }
-
-  /**
-   * Get current volume level
-   * @returns {number} Volume level from 0.0 to 1.0
-   */
-  getVolume() {
-    return this.volume;
-  }
-
-  /**
-   * Clear all queued audio chunks
-   */
-  clearQueue() {
-    const queueSize = this.queue.length;
-    this.queue = [];
-    
-    if (queueSize > 0) {
-      console.log(`Cleared ${queueSize} audio chunks from queue`);
-    }
-  }
-
-  /**
-   * Get the current queue size
-   * @returns {number} Number of audio chunks in queue
-   */
-  getQueueSize() {
-    return this.queue.length;
-  }
-
-  /**
-   * Check if audio is currently playing
-   * @returns {boolean} True if audio is playing
-   */
-  isCurrentlyPlaying() {
-    return this.isPlaying;
-  }
-
-  /**
-   * Set callback for playback start events
-   * @param {Function} callback - Called when audio chunk starts playing
-   */
-  onPlaybackStart(callback) {
-    this.onPlaybackStartCallback = callback;
-  }
-
-  /**
-   * Set callback for playback end events
-   * @param {Function} callback - Called when audio chunk finishes playing
-   */
-  onPlaybackEnd(callback) {
-    this.onPlaybackEndCallback = callback;
-  }
-
-  /**
-   * Set callback for playback errors
-   * @param {Function} callback - Called when playback error occurs
-   */
-  onError(callback) {
-    this.onErrorCallback = callback;
-  }
-
-  /**
-   * Release all resources
-   * Should be called when audio playback is no longer needed
-   */
-  release() {
-    // Stop any active playback
-    this.stop();
-
-    // Close AudioContext
-    if (this.audioContext && this.audioContext.state !== 'closed') {
-      this.audioContext.close().then(() => {
-        console.log('AudioContext closed');
-      }).catch((error) => {
-        console.error('Error closing AudioContext:', error);
-      });
-    }
-
-    // Clear references
-    this.audioContext = null;
-    this.gainNode = null;
-    this.currentSource = null;
-    this.queue = [];
-    this.onPlaybackStartCallback = null;
-    this.onPlaybackEndCallback = null;
-    this.onErrorCallback = null;
-
-    console.log('Audio playback resources released');
-  }
-
-  /**
-   * Pause playback (for mobile background transitions)
-   * Suspends the audio context to save resources
-   */
-  pause() {
-    if (!this.audioContext || this.audioContext.state === 'suspended') {
-      return;
-    }
-
-    try {
-      this.audioContext.suspend().then(() => {
-        console.log('Audio playback paused (context suspended)');
-      }).catch((error) => {
-        console.error('Failed to suspend audio context:', error);
-      });
-    } catch (error) {
-      console.error('Error pausing audio playback:', error);
-    }
-  }
-
-  /**
-   * Resume playback (for mobile foreground transitions)
-   * Resumes the audio context and continues playback if there are queued chunks
-   */
-  resume() {
-    if (!this.audioContext || this.audioContext.state !== 'suspended') {
-      return;
-    }
-
-    try {
-      this.audioContext.resume().then(() => {
-        console.log('Audio playback resumed (context resumed)');
-        
-        // If there are queued chunks and not currently playing, start playback
-        if (this.queue.length > 0 && !this.isPlaying) {
-          console.log('Resuming playback of queued audio chunks');
-          this.play();
+        if (this.masterGain.gain.setTargetAtTime) {
+          this.masterGain.gain.setTargetAtTime(this.volume, now, 0.015);
+        } else {
+          this.masterGain.gain.value = this.volume;
         }
-      }).catch((error) => {
-        console.error('Failed to resume audio context:', error);
+
+        console.log(`Volume set to ${(this.volume * 100).toFixed(0)}%`);
+      }
+    }
+
+    /**
+     * @returns {number} Volume level from 0.0 to 1.0
+     */
+    getVolume() {
+      return this.volume;
+    }
+
+    /**
+     * @returns {Array<Object>} Metadata for every speaker currently talking
+     */
+    getActiveSpeakers() {
+      const active = [];
+
+      this.speakers.forEach((speaker) => {
+        if (speaker.active) {
+          active.push(speaker.metadata);
+        }
       });
-    } catch (error) {
-      console.error('Error resuming audio playback:', error);
+
+      return active;
+    }
+
+    /**
+     * @returns {boolean} True if any speaker is currently talking
+     */
+    isCurrentlyPlaying() {
+      return this.getActiveSpeakers().length > 0;
+    }
+
+    /**
+     * @returns {number} Number of audio frames scheduled but not yet finished
+     */
+    getQueueSize() {
+      let total = 0;
+
+      this.speakers.forEach((speaker) => {
+        total += speaker.sources.size;
+      });
+
+      return total;
+    }
+
+    /**
+     * How much audio is buffered for a speaker, in milliseconds.
+     * Useful for diagnosing latency.
+     * @param {string} playerId
+     * @returns {number}
+     */
+    getBufferedMs(playerId) {
+      const speaker = this.speakers.get(playerId);
+
+      if (!speaker || !this.audioContext || speaker.nextTime === 0) {
+        return 0;
+      }
+
+      return Math.max(0, (speaker.nextTime - this.audioContext.currentTime) * 1000);
+    }
+
+    /**
+     * @param {Error} error
+     * @param {Object} metadata
+     */
+    reportError(error, metadata) {
+      console.error('Playback error:', error);
+
+      if (this.onErrorCallback) {
+        this.onErrorCallback(error, metadata);
+      }
+    }
+
+    /**
+     * Set callback fired when a speaker starts talking
+     * @param {Function} callback
+     */
+    onSpeakerStart(callback) {
+      this.onSpeakerStartCallback = callback;
+    }
+
+    /**
+     * Set callback fired when a speaker's audio has finished playing
+     * @param {Function} callback
+     */
+    onSpeakerEnd(callback) {
+      this.onSpeakerEndCallback = callback;
+    }
+
+    /**
+     * Set callback for playback errors
+     * @param {Function} callback
+     */
+    onError(callback) {
+      this.onErrorCallback = callback;
+    }
+
+    /**
+     * Resume the AudioContext. Browsers start it suspended until a user gesture.
+     * @returns {Promise<boolean>} True if the context is running afterwards
+     */
+    async resume() {
+      if (!this.audioContext) {
+        return false;
+      }
+
+      if (this.audioContext.state === 'running') {
+        return true;
+      }
+
+      try {
+        await this.audioContext.resume();
+        console.log(`AudioContext resumed (state: ${this.audioContext.state})`);
+        return this.audioContext.state === 'running';
+      } catch (error) {
+        console.warn('Failed to resume AudioContext:', error);
+        return false;
+      }
+    }
+
+    /**
+     * @returns {string|null} The AudioContext state or null
+     */
+    getContextState() {
+      return this.audioContext ? this.audioContext.state : null;
+    }
+
+    /**
+     * Release all resources
+     */
+    release() {
+      this.stop();
+
+      this.speakers.forEach((speaker) => {
+        try {
+          speaker.gain.disconnect();
+        } catch (error) {
+          // Already disconnected
+        }
+      });
+
+      this.speakers.clear();
+
+      if (this.masterGain) {
+        try {
+          this.masterGain.disconnect();
+        } catch (error) {
+          // Already disconnected
+        }
+        this.masterGain = null;
+      }
+
+      if (this.ownsAudioContext && this.audioContext && this.audioContext.state !== 'closed') {
+        this.audioContext.close().catch((error) => {
+          console.warn('Error closing AudioContext:', error);
+        });
+      }
+
+      this.audioContext = null;
+      this.onSpeakerStartCallback = null;
+      this.onSpeakerEndCallback = null;
+      this.onErrorCallback = null;
+
+      console.log('Audio playback resources released');
     }
   }
 
-  /**
-   * Get AudioContext state
-   * @returns {string|null} The AudioContext state or null
-   */
-  getContextState() {
-    return this.audioContext ? this.audioContext.state : null;
-  }
-}
+  root.AudioPlayback = AudioPlayback;
 
-// Export for use in other modules
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = AudioPlayback;
-}
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = AudioPlayback;
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this);

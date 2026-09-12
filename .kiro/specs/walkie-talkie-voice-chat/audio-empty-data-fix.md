@@ -1,5 +1,12 @@
 # Audio Empty Data Fix
 
+> **Note:** the "Chunk Accumulation Strategy" section at the end of this document
+> is superseded by [live-pcm-streaming.md](./live-pcm-streaming.md). Accumulating
+> a whole transmission before playing it was the cause of the "replies take
+> twice as long" problem; audio is now streamed as raw PCM frames while the
+> speaker is still talking, and `MediaRecorder` is no longer used. The Socket.IO
+> binary serialisation notes below still apply.
+
 ## Problem
 Voice chat was failing with "Unable to decode audio data" errors and `dataSize: 0`, indicating empty audio chunks were being transmitted and received.
 
@@ -194,7 +201,9 @@ After these changes:
 - Console logs show actual byte sizes at each stage
 
 
-## Additional Fix: Chunk Accumulation Strategy
+## Additional Fix: Chunk Accumulation Strategy (SUPERSEDED)
+
+> Replaced by [live-pcm-streaming.md](./live-pcm-streaming.md). Kept for context.
 
 ### The WebM Chunk Problem
 After fixing the Socket.IO serialization, we discovered another issue:

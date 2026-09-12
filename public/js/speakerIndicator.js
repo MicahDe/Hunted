@@ -1,6 +1,9 @@
 /**
  * Speaker Indicator Controller
- * Manages the visual indicator showing who is currently speaking
+ *
+ * Shows who is currently being heard. Tracks a set of speakers rather than a
+ * single one, because with live streaming two people can genuinely be talking
+ * at the same time and their audio is mixed rather than queued.
  */
 
 const SpeakerIndicator = {
@@ -8,171 +11,212 @@ const SpeakerIndicator = {
   indicator: null,
   speakerName: null,
   speakerTeam: null,
-  
+
+  // playerId -> metadata, in arrival order
+  speakers: new Map(),
+
   // State
   isVisible: false,
-  currentSpeaker: null,
   fadeOutTimer: null,
+  hideTimer: null,
 
   /**
    * Initialize the speaker indicator
+   * @returns {boolean} True if the elements were found
    */
   init() {
     console.log('Initializing speaker indicator...');
-    
-    // Get DOM elements
+
     this.indicator = document.getElementById('speaker-indicator');
-    this.speakerName = this.indicator?.querySelector('.speaker-name');
-    this.speakerTeam = this.indicator?.querySelector('.speaker-team');
-    
+    this.speakerName = this.indicator ? this.indicator.querySelector('.speaker-name') : null;
+    this.speakerTeam = this.indicator ? this.indicator.querySelector('.speaker-team') : null;
+
     if (!this.indicator || !this.speakerName || !this.speakerTeam) {
       console.error('Speaker indicator elements not found');
       return false;
     }
 
-    // Ensure indicator is hidden initially
-    this.hide();
-    
+    this.speakers.clear();
+    this.hideNow();
+
     console.log('Speaker indicator initialized');
     return true;
   },
 
   /**
-   * Show the speaker indicator with speaker information
-   * @param {Object} metadata - Speaker metadata (username, team, playerId)
+   * Add a speaker and show the indicator
+   * @param {Object} metadata - {playerId, username, team}
    */
-  show(metadata) {
-    if (!this.indicator || !metadata) {
+  addSpeaker(metadata) {
+    if (!metadata || !metadata.playerId) {
       return;
     }
 
-    // Clear any pending fade-out timer
+    // Re-inserting moves them to the end, making them the primary speaker
+    this.speakers.delete(metadata.playerId);
+    this.speakers.set(metadata.playerId, {
+      playerId: metadata.playerId,
+      username: metadata.username || 'Unknown',
+      team: metadata.team || 'unknown'
+    });
+
+    this.render();
+  },
+
+  /**
+   * Remove a speaker, hiding the indicator once nobody is left
+   * @param {string} playerId
+   */
+  removeSpeaker(playerId) {
+    if (!playerId || !this.speakers.has(playerId)) {
+      return;
+    }
+
+    this.speakers.delete(playerId);
+    this.render();
+  },
+
+  /**
+   * Remove every speaker immediately
+   */
+  clear() {
+    this.speakers.clear();
+    this.hideNow();
+  },
+
+  /**
+   * Update the indicator to match the current speaker set
+   */
+  render() {
+    if (!this.indicator) {
+      return;
+    }
+
+    if (this.speakers.size === 0) {
+      this.hide(400);
+      return;
+    }
+
+    const speakers = Array.from(this.speakers.values());
+    const primary = speakers[speakers.length - 1];
+
+    this.clearTimers();
+
+    if (this.speakerName) {
+      if (speakers.length === 1) {
+        this.speakerName.textContent = primary.username;
+      } else if (speakers.length === 2) {
+        this.speakerName.textContent = `${speakers[0].username} & ${speakers[1].username}`;
+      } else {
+        this.speakerName.textContent = `${primary.username} +${speakers.length - 1}`;
+      }
+    }
+
+    if (this.speakerTeam) {
+      const team = speakers.length === 1 ? primary.team : 'unknown';
+      const label = speakers.length === 1 ? team.charAt(0).toUpperCase() + team.slice(1) : 'Multiple';
+
+      this.speakerTeam.textContent = label;
+      this.speakerTeam.classList.remove('team-hunter', 'team-runner', 'team-unknown');
+      this.speakerTeam.classList.add(`team-${team}`);
+    }
+
+    this.indicator.classList.remove('hidden', 'fading-out');
+    this.isVisible = true;
+  },
+
+  /**
+   * Show the indicator for a single speaker (kept for direct callers)
+   * @param {Object} metadata - Speaker metadata
+   */
+  show(metadata) {
+    this.addSpeaker(metadata);
+  },
+
+  /**
+   * Hide the speaker indicator with a fade-out animation
+   * @param {number} delay - Delay in milliseconds before fading out
+   */
+  hide(delay = 400) {
+    if (!this.indicator || !this.isVisible) {
+      return;
+    }
+
+    this.clearTimers();
+
+    this.fadeOutTimer = setTimeout(() => {
+      this.fadeOutTimer = null;
+
+      if (!this.indicator) {
+        return;
+      }
+
+      // Someone started talking again during the delay
+      if (this.speakers.size > 0) {
+        return;
+      }
+
+      this.indicator.classList.add('fading-out');
+
+      this.hideTimer = setTimeout(() => {
+        this.hideTimer = null;
+
+        if (!this.indicator || this.speakers.size > 0) {
+          return;
+        }
+
+        this.hideNow();
+      }, 500); // Match the fade-out animation duration
+    }, delay);
+  },
+
+  /**
+   * Hide the indicator without animating
+   */
+  hideNow() {
+    this.clearTimers();
+
+    if (!this.indicator) {
+      return;
+    }
+
+    this.indicator.classList.add('hidden');
+    this.indicator.classList.remove('fading-out');
+    this.isVisible = false;
+  },
+
+  clearTimers() {
     if (this.fadeOutTimer) {
       clearTimeout(this.fadeOutTimer);
       this.fadeOutTimer = null;
     }
 
-    // Update speaker information
-    this.currentSpeaker = metadata;
-    
-    // Update speaker name
-    if (this.speakerName) {
-      this.speakerName.textContent = metadata.username || 'Unknown';
+    if (this.hideTimer) {
+      clearTimeout(this.hideTimer);
+      this.hideTimer = null;
     }
-
-    // Update speaker team with appropriate styling
-    if (this.speakerTeam) {
-      const team = metadata.team || 'unknown';
-      this.speakerTeam.textContent = team.charAt(0).toUpperCase() + team.slice(1);
-      
-      // Remove existing team classes
-      this.speakerTeam.classList.remove('team-hunter', 'team-runner', 'team-unknown');
-      
-      // Add appropriate team class
-      this.speakerTeam.classList.add(`team-${team}`);
-    }
-
-    // Remove hidden and fading-out classes
-    this.indicator.classList.remove('hidden', 'fading-out');
-    
-    // Mark as visible
-    this.isVisible = true;
-
-    console.log(`Speaker indicator shown: ${metadata.username} (${metadata.team})`);
   },
 
   /**
-   * Hide the speaker indicator with fade-out animation
-   * @param {number} delay - Delay in milliseconds before hiding (default: 500ms)
-   */
-  hide(delay = 500) {
-    if (!this.indicator || !this.isVisible) {
-      return;
-    }
-
-    // Clear any existing fade-out timer
-    if (this.fadeOutTimer) {
-      clearTimeout(this.fadeOutTimer);
-    }
-
-    // Set fade-out timer
-    this.fadeOutTimer = setTimeout(() => {
-      if (!this.indicator) return;
-
-      // Add fading-out class for animation
-      this.indicator.classList.add('fading-out');
-
-      // After animation completes, hide completely
-      setTimeout(() => {
-        if (!this.indicator) return;
-        
-        this.indicator.classList.add('hidden');
-        this.indicator.classList.remove('fading-out');
-        this.isVisible = false;
-        this.currentSpeaker = null;
-        
-        console.log('Speaker indicator hidden');
-      }, 500); // Match the fade-out animation duration
-
-    }, delay);
-  },
-
-  /**
-   * Update the speaker indicator when audio is received
-   * Called when voice_audio_received event is triggered
-   * @param {Object} data - Audio data with metadata
-   */
-  onAudioReceived(data) {
-    if (!data) return;
-
-    const metadata = {
-      playerId: data.playerId,
-      username: data.username || 'Unknown',
-      team: data.team || 'unknown',
-      timestamp: data.timestamp || Date.now()
-    };
-
-    // Show indicator with speaker info
-    this.show(metadata);
-  },
-
-  /**
-   * Handle transmission start event
-   * @param {Object} data - Transmission start data
-   */
-  onTransmissionStarted(data) {
-    if (!data) return;
-
-    const metadata = {
-      playerId: data.playerId,
-      username: data.username || 'Unknown',
-      team: data.team || 'unknown',
-      timestamp: data.timestamp || Date.now()
-    };
-
-    // Show indicator
-    this.show(metadata);
-  },
-
-  /**
-   * Handle transmission end event
-   * @param {Object} data - Transmission end data
-   */
-  onTransmissionEnded(data) {
-    // Hide indicator with 500ms fade-out
-    this.hide(500);
-  },
-
-  /**
-   * Get current speaker information
-   * @returns {Object|null} Current speaker metadata or null
+   * @returns {Object|null} The most recent speaker, or null
    */
   getCurrentSpeaker() {
-    return this.currentSpeaker;
+    if (this.speakers.size === 0) {
+      return null;
+    }
+
+    const speakers = Array.from(this.speakers.values());
+    return speakers[speakers.length - 1];
   },
 
   /**
-   * Check if indicator is currently visible
+   * @returns {Array<Object>} Every speaker currently shown
+   */
+  getSpeakers() {
+    return Array.from(this.speakers.values());
+  },
+
+  /**
    * @returns {boolean} True if visible
    */
   isCurrentlyVisible() {
@@ -184,22 +228,9 @@ const SpeakerIndicator = {
    */
   cleanup() {
     console.log('Cleaning up speaker indicator...');
-    
-    // Clear any pending timers
-    if (this.fadeOutTimer) {
-      clearTimeout(this.fadeOutTimer);
-      this.fadeOutTimer = null;
-    }
 
-    // Hide indicator immediately
-    if (this.indicator) {
-      this.indicator.classList.add('hidden');
-      this.indicator.classList.remove('fading-out');
-    }
-
-    // Reset state
-    this.isVisible = false;
-    this.currentSpeaker = null;
+    this.speakers.clear();
+    this.hideNow();
 
     console.log('Speaker indicator cleanup complete');
   }

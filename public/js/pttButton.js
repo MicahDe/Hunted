@@ -1,39 +1,86 @@
 /**
  * Push-to-Talk Button Controller
- * Handles PTT button interactions and visual states
+ *
+ * Owns the "is the user holding the button" question and nothing else. The
+ * actual transmission state lives in VoiceChat and is mirrored back here, so
+ * the button cannot get stuck looking live when transmission has already
+ * stopped (time limit reached, app backgrounded, microphone error).
+ *
+ * Pointer Events are used in preference to separate mouse and touch handlers:
+ * pointer capture means a press that starts on the button always ends on the
+ * button, even if the finger slides off or the browser interrupts the gesture.
  */
 
 const PTTButton = {
   // Button element
   button: null,
-  
-  // State
-  isActive: false,
+
+  // Is the user currently holding the button down
+  isPressed: false,
+
+  // Hard-disabled (microphone unavailable or permission denied)
   isDisabled: false,
-  
-  // Touch tracking for mobile
-  touchIdentifier: null,
+
+  // Soft-disabled (voice chat switched off in settings)
+  isAvailable: true,
+
+  // Mirrored from VoiceChat: 'idle' | 'starting' | 'transmitting'
+  transmissionState: 'idle',
+
+  // Active pointer, so a second finger cannot end someone else's press
+  pointerId: null,
+
+  // Bumped on every press, so a late failure from an earlier press cannot
+  // cancel the press the user is currently holding
+  pressGeneration: 0,
+
+  // Bound handlers, kept so cleanup() can remove them
+  handlers: null,
 
   /**
    * Initialize the PTT button
+   * @returns {boolean} True if the button was found and wired up
    */
   init() {
     console.log('Initializing PTT button...');
-    
-    // Get button element
+
     this.button = document.getElementById('ptt-btn');
-    
+
     if (!this.button) {
       console.error('PTT button element not found');
       return false;
     }
 
-    // Set up event listeners
+    // Re-initialising (for example on rejoin) must not stack listeners
+    this.removeEventListeners();
+
+    this.isPressed = false;
+    this.pointerId = null;
+    this.transmissionState = 'idle';
+
     this.setupEventListeners();
-    
-    // Set initial state
+
+    // Follow VoiceChat so the button reflects reality rather than intent
+    if (typeof VoiceChat !== 'undefined') {
+      if (VoiceChat.onTransmissionStateChange) {
+        VoiceChat.onTransmissionStateChange((state) => {
+          this.transmissionState = state;
+
+          // Transmission ended on its own while the button is still held
+          if (state === 'idle' && this.isPressed) {
+            this.isPressed = false;
+            this.releasePointer();
+          }
+
+          this.updateVisualState();
+        });
+      }
+
+      this.isAvailable = VoiceChat.getEnabled ? VoiceChat.getEnabled() : true;
+    }
+
     this.updateVisualState();
-    
+
     console.log('PTT button initialized');
     return true;
   },
@@ -42,62 +89,204 @@ const PTTButton = {
    * Set up event listeners for PTT button
    */
   setupEventListeners() {
-    // Mouse events (desktop)
-    this.button.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      this.handlePressStart();
-    });
+    const button = this.button;
 
-    this.button.addEventListener('mouseup', (e) => {
-      e.preventDefault();
-      this.handlePressEnd();
-    });
+    const handlers = {
+      pointerdown: (event) => {
+        // Primary button / first finger only
+        if (event.button !== undefined && event.button !== 0) {
+          return;
+        }
 
-    this.button.addEventListener('mouseleave', (e) => {
-      // If user drags mouse off button while holding, stop transmission
-      if (this.isActive) {
-        this.handlePressEnd();
-      }
-    });
+        if (this.pointerId !== null) {
+          return;
+        }
 
-    // Touch events (mobile)
-    this.button.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      
-      // Store the first touch identifier
-      if (e.changedTouches.length > 0) {
-        this.touchIdentifier = e.changedTouches[0].identifier;
+        event.preventDefault();
+
+        this.pointerId = event.pointerId;
+
+        // Capture routes every later event for this pointer to the button, so a
+        // finger sliding off or a release outside still ends the press here
+        if (button.setPointerCapture) {
+          try {
+            button.setPointerCapture(event.pointerId);
+          } catch (error) {
+            // Capture is best-effort; the document fallback below covers it
+          }
+        }
+
         this.handlePressStart();
-      }
-    }, { passive: false });
 
-    this.button.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      
-      // Check if the released touch matches our stored identifier
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        if (e.changedTouches[i].identifier === this.touchIdentifier) {
-          this.touchIdentifier = null;
+        // The press was refused (button disabled, voice chat off, app in the
+        // background). Let the pointer go, or the next press is ignored too.
+        if (!this.isPressed) {
+          this.releasePointer();
+        }
+      },
+
+      pointerup: (event) => {
+        if (event.pointerId !== this.pointerId) {
+          return;
+        }
+
+        event.preventDefault();
+        this.handlePressEnd();
+      },
+
+      pointercancel: (event) => {
+        if (event.pointerId !== this.pointerId) {
+          return;
+        }
+
+        this.handlePressEnd();
+      },
+
+      lostpointercapture: (event) => {
+        // Fires if the browser takes the pointer away mid-gesture
+        if (event.pointerId === this.pointerId) {
           this.handlePressEnd();
-          break;
+        }
+      },
+
+      contextmenu: (event) => {
+        // Long press on mobile would otherwise pop the context menu
+        event.preventDefault();
+      },
+
+      keydown: (event) => {
+        if (event.key !== ' ' && event.key !== 'Enter' && event.code !== 'Space') {
+          return;
+        }
+
+        // Holding a key fires keydown repeatedly
+        if (event.repeat || this.isPressed) {
+          event.preventDefault();
+          return;
+        }
+
+        event.preventDefault();
+        this.handlePressStart();
+      },
+
+      keyup: (event) => {
+        if (event.key !== ' ' && event.key !== 'Enter' && event.code !== 'Space') {
+          return;
+        }
+
+        event.preventDefault();
+        this.handlePressEnd();
+      },
+
+      // A click is synthesised after keyboard activation; swallow it so it
+      // cannot trigger anything else
+      click: (event) => {
+        event.preventDefault();
+      }
+    };
+
+    // Anything that takes focus or attention away from the page must end the
+    // press, otherwise the microphone stays live with no button held
+    const globalHandlers = {
+      blur: () => {
+        if (this.isPressed) {
+          console.log('Window lost focus, releasing push-to-talk');
+          this.handlePressEnd();
+        }
+      },
+
+      visibilitychange: () => {
+        if (document.hidden && this.isPressed) {
+          console.log('Page hidden, releasing push-to-talk');
+          this.handlePressEnd();
         }
       }
-    }, { passive: false });
+    };
 
-    this.button.addEventListener('touchcancel', (e) => {
-      e.preventDefault();
-      
-      // Handle touch cancellation (e.g., system interruption)
-      if (this.isActive) {
-        this.touchIdentifier = null;
+    if (typeof window.PointerEvent !== 'undefined') {
+      button.addEventListener('pointerdown', handlers.pointerdown);
+      button.addEventListener('pointerup', handlers.pointerup);
+      button.addEventListener('pointercancel', handlers.pointercancel);
+      button.addEventListener('lostpointercapture', handlers.lostpointercapture);
+    } else {
+      // Fallback for browsers without Pointer Events
+      handlers.mousedown = (event) => {
+        if (event.button !== 0) {
+          return;
+        }
+        event.preventDefault();
+        this.handlePressStart();
+      };
+      handlers.mouseup = (event) => {
+        event.preventDefault();
         this.handlePressEnd();
-      }
-    }, { passive: false });
+      };
+      handlers.mouseleave = () => {
+        this.handlePressEnd();
+      };
+      handlers.touchstart = (event) => {
+        event.preventDefault();
+        this.handlePressStart();
+      };
+      handlers.touchend = (event) => {
+        event.preventDefault();
+        this.handlePressEnd();
+      };
+      handlers.touchcancel = () => {
+        this.handlePressEnd();
+      };
 
-    // Prevent context menu on long press (mobile)
-    this.button.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
+      button.addEventListener('mousedown', handlers.mousedown);
+      button.addEventListener('mouseup', handlers.mouseup);
+      button.addEventListener('mouseleave', handlers.mouseleave);
+      button.addEventListener('touchstart', handlers.touchstart, { passive: false });
+      button.addEventListener('touchend', handlers.touchend, { passive: false });
+      button.addEventListener('touchcancel', handlers.touchcancel);
+    }
+
+    button.addEventListener('contextmenu', handlers.contextmenu);
+    button.addEventListener('keydown', handlers.keydown);
+    button.addEventListener('keyup', handlers.keyup);
+    button.addEventListener('click', handlers.click);
+
+    window.addEventListener('blur', globalHandlers.blur);
+    document.addEventListener('visibilitychange', globalHandlers.visibilitychange);
+
+    this.handlers = { button: handlers, global: globalHandlers };
+  },
+
+  /**
+   * Remove every listener registered by setupEventListeners
+   */
+  removeEventListeners() {
+    if (!this.handlers || !this.button) {
+      return;
+    }
+
+    const { button: handlers, global: globalHandlers } = this.handlers;
+
+    Object.keys(handlers).forEach((eventName) => {
+      this.button.removeEventListener(eventName, handlers[eventName]);
     });
+
+    window.removeEventListener('blur', globalHandlers.blur);
+    document.removeEventListener('visibilitychange', globalHandlers.visibilitychange);
+
+    this.handlers = null;
+  },
+
+  releasePointer() {
+    if (this.pointerId !== null && this.button && this.button.releasePointerCapture) {
+      try {
+        if (!this.button.hasPointerCapture || this.button.hasPointerCapture(this.pointerId)) {
+          this.button.releasePointerCapture(this.pointerId);
+        }
+      } catch (error) {
+        // Capture may already have been lost
+      }
+    }
+
+    this.pointerId = null;
   },
 
   /**
@@ -105,50 +294,52 @@ const PTTButton = {
    */
   handlePressStart() {
     try {
-      // Don't start if disabled or already active
-      if (this.isDisabled || this.isActive) {
+      if (this.isDisabled || !this.isAvailable || this.isPressed) {
         return;
       }
 
-      // Check if voice chat is available
       if (typeof VoiceChat === 'undefined') {
         console.error('VoiceChat module not available');
         return;
       }
 
-      // Check if voice chat is enabled
       if (!VoiceChat.isEnabled) {
         console.log('Voice chat is disabled');
         return;
       }
 
-      // Check if app is in background (mobile optimization)
       if (VoiceChat.isAppInBackground && VoiceChat.isAppInBackground()) {
         console.log('Cannot start transmission while app is in background');
         return;
       }
 
       console.log('PTT button pressed');
-      
-      // Update state
-      this.isActive = true;
+
+      const generation = ++this.pressGeneration;
+
+      this.isPressed = true;
       this.updateVisualState();
 
-      // Start voice transmission
-      VoiceChat.startTransmission().catch((error) => {
+      // startTransmission resolves once audio is actually flowing; it aborts by
+      // itself if handlePressEnd runs first
+      Promise.resolve(VoiceChat.startTransmission()).catch((error) => {
         console.error('Failed to start transmission:', error);
-        
-        // Show user-friendly error message
+
+        if (generation !== this.pressGeneration) {
+          return;
+        }
+
         this.handleTransmissionError(error);
-        
-        // Reset button state
-        this.isActive = false;
+
+        this.isPressed = false;
+        this.releasePointer();
         this.updateVisualState();
       });
     } catch (error) {
       console.error('Error in PTT button press start:', error);
-      // Reset button state on error
-      this.isActive = false;
+
+      this.isPressed = false;
+      this.releasePointer();
       this.updateVisualState();
     }
   },
@@ -158,28 +349,30 @@ const PTTButton = {
    */
   handlePressEnd() {
     try {
-      if (!this.isActive) {
+      this.releasePointer();
+
+      if (!this.isPressed) {
         return;
       }
 
       console.log('PTT button released');
-      
-      // Update state
-      this.isActive = false;
+
+      this.isPressed = false;
       this.updateVisualState();
 
-      // Check if voice chat is available
       if (typeof VoiceChat === 'undefined') {
         console.error('VoiceChat module not available');
         return;
       }
 
-      // Stop voice transmission
-      VoiceChat.stopTransmission();
+      // Safe to call even if the transmission never got as far as starting
+      Promise.resolve(VoiceChat.stopTransmission()).catch((error) => {
+        console.error('Failed to stop transmission cleanly:', error);
+      });
     } catch (error) {
       console.error('Error in PTT button press end:', error);
-      // Force reset button state on error
-      this.isActive = false;
+
+      this.isPressed = false;
       this.updateVisualState();
     }
   },
@@ -189,26 +382,18 @@ const PTTButton = {
    * @param {Error} error - The error that occurred
    */
   handleTransmissionError(error) {
-    let message = 'Voice transmission failed';
-    
-    // Provide specific error messages based on error type
-    if (error.name === 'NotAllowedError') {
-      message = 'Microphone access denied. Please enable microphone permissions in your browser settings.';
-    } else if (error.name === 'NotFoundError') {
-      message = 'No microphone found. Please connect a microphone and try again.';
-    } else if (error.name === 'NotReadableError') {
-      message = 'Microphone is already in use by another application.';
-    } else if (error.name === 'OverconstrainedError') {
-      message = 'Microphone does not meet requirements.';
-    } else if (error.name === 'SecurityError') {
-      message = 'Microphone access blocked for security reasons.';
+    // VoiceChat already surfaces microphone problems with a help link, so only
+    // report anything it did not recognise
+    if (error && (error.errorType || error.name)) {
+      return;
     }
 
-    // Show notification to user
+    const message = 'Voice transmission failed';
+
     if (typeof UI !== 'undefined' && UI.showNotification) {
       UI.showNotification(message, 'error');
     } else {
-      alert(message);
+      console.error(message, error);
     }
   },
 
@@ -216,31 +401,40 @@ const PTTButton = {
    * Update visual state of the button
    */
   updateVisualState() {
-    if (!this.button) return;
+    if (!this.button) {
+      return;
+    }
 
-    // Remove all state classes
-    this.button.classList.remove('ptt-idle', 'ptt-active', 'ptt-disabled');
+    this.button.classList.remove('ptt-idle', 'ptt-active', 'ptt-connecting', 'ptt-disabled');
 
-    // Add appropriate state class
-    if (this.isDisabled) {
+    const unusable = this.isDisabled || !this.isAvailable;
+
+    if (unusable) {
       this.button.classList.add('ptt-disabled');
       this.button.disabled = true;
       this.button.setAttribute('aria-disabled', 'true');
-    } else if (this.isActive) {
+      this.button.setAttribute('aria-pressed', 'false');
+      return;
+    }
+
+    this.button.disabled = false;
+    this.button.setAttribute('aria-disabled', 'false');
+
+    if (this.transmissionState === 'transmitting') {
       this.button.classList.add('ptt-active');
-      this.button.disabled = false;
-      this.button.setAttribute('aria-disabled', 'false');
+      this.button.setAttribute('aria-pressed', 'true');
+    } else if (this.isPressed) {
+      // Held, but the microphone is not streaming yet
+      this.button.classList.add('ptt-connecting');
       this.button.setAttribute('aria-pressed', 'true');
     } else {
       this.button.classList.add('ptt-idle');
-      this.button.disabled = false;
-      this.button.setAttribute('aria-disabled', 'false');
       this.button.setAttribute('aria-pressed', 'false');
     }
   },
 
   /**
-   * Enable the PTT button
+   * Enable the PTT button after a recoverable error
    */
   enable() {
     this.isDisabled = false;
@@ -249,17 +443,29 @@ const PTTButton = {
   },
 
   /**
-   * Disable the PTT button
+   * Hard-disable the PTT button (no usable microphone)
    */
   disable() {
-    // If currently transmitting, stop first
-    if (this.isActive) {
+    if (this.isPressed) {
       this.handlePressEnd();
     }
-    
+
     this.isDisabled = true;
     this.updateVisualState();
     console.log('PTT button disabled');
+  },
+
+  /**
+   * Reflect the voice chat on/off setting
+   * @param {boolean} available
+   */
+  setAvailable(available) {
+    if (!available && this.isPressed) {
+      this.handlePressEnd();
+    }
+
+    this.isAvailable = !!available;
+    this.updateVisualState();
   },
 
   /**
@@ -281,20 +487,29 @@ const PTTButton = {
   },
 
   /**
+   * @returns {boolean} True while the user is holding the button
+   */
+  isCurrentlyPressed() {
+    return this.isPressed;
+  },
+
+  /**
    * Clean up event listeners and reset state
    */
   cleanup() {
     console.log('Cleaning up PTT button...');
-    
-    // Stop any active transmission
-    if (this.isActive) {
+
+    if (this.isPressed) {
       this.handlePressEnd();
     }
 
-    // Reset state
-    this.isActive = false;
+    this.removeEventListeners();
+
+    this.isPressed = false;
     this.isDisabled = false;
-    this.touchIdentifier = null;
+    this.isAvailable = true;
+    this.transmissionState = 'idle';
+    this.pointerId = null;
 
     console.log('PTT button cleanup complete');
   }
