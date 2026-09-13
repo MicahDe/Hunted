@@ -1,5 +1,10 @@
 # Mobile-Specific Optimizations for Voice Chat
 
+> **Superseded in part:** the push-to-talk control described here is now a
+> microphone toggle (tap on, tap off, off by default), and audio streams as
+> raw PCM rather than via `MediaRecorder`. See
+> [live-pcm-streaming.md](./live-pcm-streaming.md).
+
 ## Overview
 
 This document describes the mobile-specific optimizations implemented for the walkie-talkie voice chat feature in the HUNTED game. These optimizations ensure reliable voice communication on mobile devices (iOS and Android) while handling platform-specific constraints and policies.

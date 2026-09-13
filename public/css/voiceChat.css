@@ -4,10 +4,10 @@
  */
 
 /* ===========================
-   Push-to-Talk Button
+   Microphone Toggle Button
    =========================== */
 
-.ptt-button {
+.mic-button {
     position: fixed;
     bottom: 80px;
     right: 20px;
@@ -27,8 +27,8 @@
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
-    /* Pointer capture needs the browser to stop treating a press as a pan */
-    touch-action: none;
+    /* Fast tap with no double-tap zoom */
+    touch-action: manipulation;
     transition: all var(--transition-fast) ease;
     z-index: var(--z-index-above);
     min-width: 80px;
@@ -36,12 +36,12 @@
 }
 
 /* Show PTT button only on game screen */
-#game-screen.active .ptt-button {
+#game-screen.active .mic-button {
     display: flex;
 }
 
 /* PTT Button Icon */
-.ptt-button .mic-icon {
+.mic-button .mic-icon {
     width: 32px;
     height: 32px;
     color: var(--color-text-primary);
@@ -49,7 +49,7 @@
 }
 
 /* PTT Button Label */
-.ptt-button .ptt-label {
+.mic-button .mic-label {
     font-size: var(--font-size-xs);
     font-family: var(--font-family-mono);
     letter-spacing: 0.5px;
@@ -61,62 +61,77 @@
 }
 
 /* ===========================
-   PTT Button States
+   Microphone Button States
    =========================== */
 
-/* Idle State (default) */
-.ptt-button.ptt-idle {
+/* Icon swap: a struck-through mic while muted, a plain one while live */
+.mic-button .mic-icon-live {
+    display: none;
+}
+
+.mic-button.mic-live .mic-icon-live,
+.mic-button.mic-connecting .mic-icon-live {
+    display: block;
+}
+
+.mic-button.mic-live .mic-icon-muted,
+.mic-button.mic-connecting .mic-icon-muted {
+    display: none;
+}
+
+/* Muted (default) */
+.mic-button.mic-off {
     background-color: var(--color-surface-variant);
     border-color: var(--color-border);
 }
 
-.ptt-button.ptt-idle:hover {
+.mic-button.mic-off:hover {
     background-color: var(--color-surface);
     border-color: var(--color-secondary);
     transform: translateY(-2px);
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 
-.ptt-button.ptt-idle:active {
+.mic-button.mic-off:active {
     transform: translateY(0);
 }
 
-/* Active State (transmitting) */
-.ptt-button.ptt-active {
+/* Live: the microphone is open and transmitting */
+.mic-button.mic-live {
     background-color: var(--color-error);
     border-color: var(--color-error);
-    animation: ptt-pulse 1.5s ease-in-out infinite;
+    animation: mic-pulse 1.5s ease-in-out infinite;
     transform: scale(1.05);
 }
 
-.ptt-button.ptt-active .mic-icon {
+.mic-button.mic-live .mic-icon {
     color: var(--color-text-on-dark);
-    animation: ptt-icon-pulse 1s ease-in-out infinite;
+    animation: mic-icon-pulse 1s ease-in-out infinite;
 }
 
-.ptt-button.ptt-active .ptt-label {
+.mic-button.mic-live .mic-label {
     color: var(--color-text-on-dark);
     font-weight: var(--font-weight-bold);
 }
 
-/* Connecting State (held, microphone not streaming yet) */
-.ptt-button.ptt-connecting {
+/* Connecting: unmute requested, microphone not open yet */
+.mic-button.mic-connecting {
     background-color: var(--color-warning);
     border-color: var(--color-warning);
     transform: scale(1.02);
 }
 
-.ptt-button.ptt-connecting .mic-icon {
+.mic-button.mic-connecting .mic-icon {
     color: var(--color-text-on-dark);
-    animation: ptt-icon-pulse 0.6s ease-in-out infinite;
+    animation: mic-icon-pulse 0.6s ease-in-out infinite;
 }
 
-.ptt-button.ptt-connecting .ptt-label {
+.mic-button.mic-connecting .mic-label {
     color: var(--color-text-on-dark);
 }
 
 /* Disabled State */
-.ptt-button.ptt-disabled {
+.mic-button.mic-disabled {
     background-color: var(--color-surface);
     border-color: var(--color-border);
     opacity: 0.5;
@@ -124,11 +139,11 @@
     pointer-events: none;
 }
 
-.ptt-button.ptt-disabled .mic-icon {
+.mic-button.mic-disabled .mic-icon {
     color: var(--color-text-tertiary);
 }
 
-.ptt-button.ptt-disabled .ptt-label {
+.mic-button.mic-disabled .mic-label {
     color: var(--color-text-tertiary);
 }
 
@@ -136,7 +151,7 @@
    PTT Button Animations
    =========================== */
 
-@keyframes ptt-pulse {
+@keyframes mic-pulse {
 
     0%,
     100% {
@@ -148,7 +163,7 @@
     }
 }
 
-@keyframes ptt-icon-pulse {
+@keyframes mic-icon-pulse {
 
     0%,
     100% {
@@ -166,7 +181,7 @@
 
 /* Mobile devices */
 @media (max-width: 768px) {
-    .ptt-button {
+    .mic-button {
         bottom: 70px;
         right: 15px;
         min-width: 70px;
@@ -174,19 +189,19 @@
         padding: 12px 16px;
     }
 
-    .ptt-button .mic-icon {
+    .mic-button .mic-icon {
         width: 28px;
         height: 28px;
     }
 
-    .ptt-button .ptt-label {
+    .mic-button .mic-label {
         font-size: 10px;
     }
 }
 
 /* Small mobile devices */
 @media (max-width: 480px) {
-    .ptt-button {
+    .mic-button {
         bottom: 60px;
         right: 10px;
         min-width: 60px;
@@ -195,19 +210,19 @@
         gap: 4px;
     }
 
-    .ptt-button .mic-icon {
+    .mic-button .mic-icon {
         width: 24px;
         height: 24px;
     }
 
-    .ptt-button .ptt-label {
+    .mic-button .mic-label {
         font-size: 9px;
     }
 }
 
 /* Landscape orientation on mobile */
 @media (max-height: 500px) and (orientation: landscape) {
-    .ptt-button {
+    .mic-button {
         bottom: 10px;
         right: 10px;
         min-width: 50px;
@@ -215,12 +230,12 @@
         padding: 8px 10px;
     }
 
-    .ptt-button .mic-icon {
+    .mic-button .mic-icon {
         width: 20px;
         height: 20px;
     }
 
-    .ptt-button .ptt-label {
+    .mic-button .mic-label {
         display: none;
         /* Hide label in landscape to save space */
     }
@@ -228,14 +243,14 @@
 
 /* Tablet devices */
 @media (min-width: 769px) and (max-width: 1024px) {
-    .ptt-button {
+    .mic-button {
         bottom: 90px;
         right: 25px;
         min-width: 90px;
         min-height: 90px;
     }
 
-    .ptt-button .mic-icon {
+    .mic-button .mic-icon {
         width: 36px;
         height: 36px;
     }
@@ -243,7 +258,7 @@
 
 /* Desktop devices */
 @media (min-width: 1025px) {
-    .ptt-button {
+    .mic-button {
         bottom: 100px;
         right: 30px;
         min-width: 100px;
@@ -251,12 +266,12 @@
         padding: 20px 24px;
     }
 
-    .ptt-button .mic-icon {
+    .mic-button .mic-icon {
         width: 40px;
         height: 40px;
     }
 
-    .ptt-button .ptt-label {
+    .mic-button .mic-label {
         font-size: var(--font-size-sm);
     }
 }
@@ -267,7 +282,7 @@
 
 /* Ensure minimum touch target size for accessibility (44x44px minimum per WCAG) */
 @media (pointer: coarse) {
-    .ptt-button {
+    .mic-button {
         min-width: 70px;
         min-height: 70px;
         /* Add extra padding for better touch area */
@@ -277,7 +292,7 @@
 
 /* iOS-specific optimizations */
 @supports (-webkit-touch-callout: none) {
-    .ptt-button {
+    .mic-button {
         /* Prevent iOS text selection on long press */
         -webkit-touch-callout: none;
         -webkit-user-select: none;
@@ -291,10 +306,8 @@
 
 /* Android-specific optimizations */
 @media (pointer: coarse) and (hover: none) {
-    .ptt-button {
-        /* Improve touch responsiveness on Android */
-        touch-action: manipulation;
-        /* Prevent accidental zooming on double-tap */
+    .mic-button {
+        /* Fast tap, and no accidental zoom on double-tap */
         touch-action: manipulation;
     }
 }
@@ -304,11 +317,11 @@
    =========================== */
 
 @media (prefers-contrast: high) {
-    .ptt-button {
+    .mic-button {
         border-width: 3px;
     }
 
-    .ptt-button.ptt-active {
+    .mic-button.mic-live {
         border-width: 4px;
     }
 }
@@ -319,21 +332,21 @@
 
 @media (prefers-reduced-motion: reduce) {
 
-    .ptt-button,
-    .ptt-button .mic-icon,
-    .ptt-button .ptt-label {
+    .mic-button,
+    .mic-button .mic-icon,
+    .mic-button .mic-label {
         transition: none;
         animation: none;
     }
 
-    .ptt-button.ptt-active,
-    .ptt-button.ptt-connecting {
+    .mic-button.mic-live,
+    .mic-button.mic-connecting {
         animation: none;
         transform: scale(1);
     }
 
-    .ptt-button.ptt-active .mic-icon,
-    .ptt-button.ptt-connecting .mic-icon {
+    .mic-button.mic-live .mic-icon,
+    .mic-button.mic-connecting .mic-icon {
         animation: none;
     }
 }
@@ -342,7 +355,7 @@
    Focus Styles for Accessibility
    =========================== */
 
-.ptt-button:focus-visible {
+.mic-button:focus-visible {
     outline: 3px solid var(--color-secondary);
     outline-offset: 2px;
 }
@@ -352,7 +365,7 @@
    =========================== */
 
 @media print {
-    .ptt-button {
+    .mic-button {
         display: none;
     }
 }

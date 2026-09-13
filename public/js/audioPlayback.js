@@ -133,7 +133,7 @@
 
     /**
      * Mark a speaker as live before any audio has arrived, so the UI can react
-     * the instant they press push-to-talk.
+     * the instant they turn their microphone on.
      * @param {Object} metadata - {playerId, username, team}
      */
     noteSpeakerStart(metadata) {
@@ -270,7 +270,7 @@
     }
 
     /**
-     * Note that a speaker released push-to-talk. Their buffered audio keeps
+     * Note that a speaker closed their microphone. Their buffered audio keeps
      * playing; the speaker is only retired once it has all been heard.
      * @param {string} playerId
      */

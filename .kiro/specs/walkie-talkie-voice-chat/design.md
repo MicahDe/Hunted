@@ -1,5 +1,10 @@
 # Design Document
 
+> **Superseded in part:** the push-to-talk control described here is now a
+> microphone toggle (tap on, tap off, off by default), and audio streams as
+> raw PCM rather than via `MediaRecorder`. See
+> [live-pcm-streaming.md](./live-pcm-streaming.md).
+
 ## Overview
 
 The walkie-talkie voice communication feature will enable real-time push-to-talk voice transmission between players in the HUNTED game. The system leverages the existing Socket.IO infrastructure for audio streaming, using the browser's MediaRecorder API for audio capture and the Web Audio API for playback. The design prioritizes low latency, cross-browser compatibility, and seamless integration with the existing game architecture.

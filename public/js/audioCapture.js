@@ -2,8 +2,8 @@
  * Audio Capture Module for HUNTED Voice Chat
  *
  * Captures raw PCM from the microphone and emits small fixed-size frames while
- * the user is still holding push-to-talk, so audio can be streamed live instead
- * of being assembled into a file at the end of the transmission.
+ * the microphone is open, so audio can be streamed live instead of being
+ * assembled into a file at the end of the transmission.
  *
  * Pipeline:
  *   getUserMedia -> MediaStreamAudioSourceNode -> AudioWorklet (framer)
@@ -40,8 +40,8 @@
         workletUrl: config.workletUrl || '/js/pcmRecorderWorklet.js',
 
         // How long the microphone stream is kept warm after a transmission ends.
-        // Keeping it open makes the next press instant (no getUserMedia delay,
-        // no clipped first syllable); releasing it eventually frees the device,
+        // Keeping it open makes turning the mic back on instant (no getUserMedia
+        // delay, no clipped first syllable); releasing it frees the device,
         // drops the browser's recording indicator and restores the normal audio
         // output route on iOS.
         micIdleReleaseMs: config.micIdleReleaseMs !== undefined ? config.micIdleReleaseMs : 30000,

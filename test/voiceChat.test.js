@@ -1,6 +1,6 @@
 /**
  * Tests for the VoiceChat coordinator: the transmission state machine, the
- * push-to-talk race that used to leave the microphone live, and self-echo
+ * start/stop race that used to leave the microphone live, and self-echo
  * filtering.
  */
 
@@ -262,7 +262,7 @@ test('the tail of a transmission is flushed before the end is announced', async 
   assert.ok(lastFrame < end, 'the tail frame must go out before the end event');
 });
 
-test('releasing before the microphone is ready does not leave it transmitting', async () => {
+test('turning the mic off before it is ready does not leave it transmitting', async () => {
   const { VoiceChat, socket, capture } = setupVoiceChat();
 
   // Microphone acquisition hangs until we let it go
@@ -275,7 +275,7 @@ test('releasing before the microphone is ready does not leave it transmitting', 
 
   assert.strictEqual(VoiceChat.state, 'starting');
 
-  // The user taps and lets go before permission resolves
+  // The user turns it straight back off before permission resolves
   await VoiceChat.stopTransmission();
 
   assert.strictEqual(VoiceChat.state, 'idle');
@@ -283,44 +283,44 @@ test('releasing before the microphone is ready does not leave it transmitting', 
   openMic();
   await starting;
 
-  assert.strictEqual(VoiceChat.state, 'idle', 'must not go hot-mic after an aborted press');
+  assert.strictEqual(VoiceChat.state, 'idle', 'must not go hot-mic after an aborted start');
   assert.strictEqual(capture.startCalls, 0, 'capture should never have started');
   assert.strictEqual(socket.events('voice_transmission_start').length, 0);
   assert.strictEqual(socket.events('voice_transmission_end').length, 0, 'no start means no end');
   assert.strictEqual(audioFrames(socket).length, 0);
 });
 
-test('an aborted press does not cancel the press that replaced it', async () => {
+test('an aborted start does not cancel the start that replaced it', async () => {
   const { VoiceChat, socket, capture } = setupVoiceChat();
 
-  // First press: the microphone hangs
+  // First attempt: the microphone hangs
   let openFirstMic;
   capture.prepareGate = new Promise((resolve) => {
     openFirstMic = resolve;
   });
 
-  const firstPress = VoiceChat.startTransmission();
+  const firstAttempt = VoiceChat.startTransmission();
 
-  // Released, then pressed again straight away. The second press finds the
+  // Turned off, then straight back on. The second attempt finds the
   // microphone ready.
   await VoiceChat.stopTransmission();
   capture.prepareGate = null;
 
-  const secondPress = VoiceChat.startTransmission();
+  const secondAttempt = VoiceChat.startTransmission();
 
   // The first attempt only now discovers it was abandoned
   openFirstMic();
-  await firstPress;
-  await secondPress;
+  await firstAttempt;
+  await secondAttempt;
 
-  assert.strictEqual(VoiceChat.state, 'transmitting', 'the live press must survive');
-  assert.strictEqual(capture.startCalls, 1, 'only the second press should have started capture');
+  assert.strictEqual(VoiceChat.state, 'transmitting', 'the live attempt must survive');
+  assert.strictEqual(capture.startCalls, 1, 'only the second attempt should have started capture');
   assert.strictEqual(socket.events('voice_transmission_start').length, 1);
 
   await VoiceChat.stopTransmission();
 });
 
-test('a frame arriving after release is not transmitted', async () => {
+test('a frame arriving after the microphone closes is not transmitted', async () => {
   const { VoiceChat, socket, capture } = setupVoiceChat();
 
   await VoiceChat.startTransmission();
@@ -355,7 +355,7 @@ test('a stop with nothing running is a no-op', async () => {
   assert.strictEqual(socket.emitted.length, 0);
 });
 
-test('a fast double tap keeps the control events in order', async () => {
+test('turning the mic straight back on keeps the control events in order', async () => {
   const { VoiceChat, socket } = setupVoiceChat();
 
   await VoiceChat.startTransmission();
@@ -376,10 +376,8 @@ test('a fast double tap keeps the control events in order', async () => {
   ]);
 });
 
-test('the hold time limit stops transmission and notifies listeners', async () => {
+test('the microphone stays open until it is explicitly closed', async () => {
   const { VoiceChat, socket, capture } = setupVoiceChat();
-
-  VoiceChat.config.maxTransmissionDuration = 40;
 
   const states = [];
   VoiceChat.onTransmissionStateChange((state) => states.push(state));
@@ -387,12 +385,47 @@ test('the hold time limit stops transmission and notifies listeners', async () =
   await VoiceChat.startTransmission();
   assert.deepStrictEqual(states, ['starting', 'transmitting']);
 
+  // The old control cut transmission off after 30 seconds, which would silently
+  // mute a latched microphone. Nothing should stop it but the player.
   await new Promise((resolve) => setTimeout(resolve, 150));
 
+  assert.strictEqual(VoiceChat.state, 'transmitting');
+  assert.strictEqual(capture.stopCalls, 0);
+  assert.strictEqual(socket.events('voice_transmission_end').length, 0);
+
+  capture.emitFrame();
+  assert.strictEqual(audioFrames(socket).length, 1, 'audio should still be flowing');
+
+  await VoiceChat.stopTransmission();
+
   assert.strictEqual(VoiceChat.state, 'idle');
-  assert.strictEqual(states[states.length - 1], 'idle', 'the PTT button must be told it stopped');
-  assert.strictEqual(capture.stopCalls, 1);
+  assert.strictEqual(states[states.length - 1], 'idle', 'the button must be told it stopped');
   assert.strictEqual(socket.events('voice_transmission_end').length, 1);
+});
+
+test('closing for a reason other than a tap still notifies the button', async () => {
+  const { VoiceChat, capture } = setupVoiceChat();
+
+  const states = [];
+  VoiceChat.onTransmissionStateChange((state) => states.push(state));
+
+  await VoiceChat.startTransmission();
+
+  // A microphone that is unplugged mid-sentence
+  const unplugged = new Error('Microphone disconnected');
+  unplugged.errorType = 'DeviceDisconnected';
+
+  global.UI = { showNotification: () => {} };
+  global.MicButton = { disable: () => {} };
+
+  capture.onError(unplugged);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.strictEqual(VoiceChat.state, 'idle');
+  assert.strictEqual(states[states.length - 1], 'idle');
+
+  delete global.UI;
+  delete global.MicButton;
 });
 
 test('nothing is sent while the socket is disconnected', async () => {
@@ -435,7 +468,7 @@ test('a microphone failure reports the error and leaves no transmission running'
 
   const notifications = [];
   global.UI = { showNotification: (message, level) => notifications.push({ message, level }) };
-  global.PTTButton = { disable: () => notifications.push({ message: 'disabled', level: 'ptt' }) };
+  global.MicButton = { disable: () => notifications.push({ message: 'disabled', level: 'mic' }) };
 
   await assert.rejects(() => VoiceChat.startTransmission());
 
@@ -446,12 +479,12 @@ test('a microphone failure reports the error and leaves no transmission running'
     'the user should be told why it failed'
   );
   assert.ok(
-    notifications.some((entry) => entry.level === 'ptt'),
+    notifications.some((entry) => entry.level === 'mic'),
     'the button should be disabled when permission is denied'
   );
 
   delete global.UI;
-  delete global.PTTButton;
+  delete global.MicButton;
 });
 
 test('incoming audio is played as it arrives', () => {

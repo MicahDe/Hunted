@@ -1,5 +1,10 @@
 # Implementation Plan
 
+> **Superseded in part:** the push-to-talk control described here is now a
+> microphone toggle (tap on, tap off, off by default), and audio streams as
+> raw PCM rather than via `MediaRecorder`. See
+> [live-pcm-streaming.md](./live-pcm-streaming.md).
+
 - [x] 1. Create audio capture module
 
 

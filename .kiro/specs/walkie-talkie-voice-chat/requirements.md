@@ -1,5 +1,10 @@
 # Requirements Document
 
+> **Superseded in part:** the push-to-talk control described here is now a
+> microphone toggle (tap on, tap off, off by default), and audio streams as
+> raw PCM rather than via `MediaRecorder`. See
+> [live-pcm-streaming.md](./live-pcm-streaming.md).
+
 ## Introduction
 
 This document specifies the requirements for a walkie-talkie style voice communication feature for the HUNTED game. The feature will allow hunters to communicate with each other using push-to-talk voice transmission, with the option for runners to listen in on hunter communications. The system will use the existing Socket.IO infrastructure for real-time audio streaming.

@@ -1,10 +1,11 @@
 /**
  * Voice Chat Manager for HUNTED Game
  *
- * Central coordinator for walkie-talkie style voice communication. Audio is
- * streamed live while push-to-talk is held: small PCM frames go out every
- * ~80ms and receivers start hearing them within a few hundred milliseconds
- * instead of waiting for the whole message to finish.
+ * Central coordinator for voice communication. The microphone is off until the
+ * player turns it on, and then stays open until they turn it off again. While
+ * it is open, audio streams live: small PCM frames go out every ~80ms and
+ * receivers start hearing them within a few hundred milliseconds instead of
+ * waiting for the speaker to finish.
  */
 
 const VoiceChat = {
@@ -19,7 +20,7 @@ const VoiceChat = {
   state: 'idle',
 
   // Bumped on every start/stop request so an in-flight start can tell that the
-  // user has already let go of the button and abort instead of going hot-mic.
+  // microphone was turned off again, and abort instead of opening unattended.
   transmissionGeneration: 0,
 
   // Audio components
@@ -36,7 +37,6 @@ const VoiceChat = {
 
   // Transmission tracking
   transmissionStartTime: null,
-  transmissionTimer: null,
   sequenceNumber: 0,
   droppedFrames: 0,
 
@@ -60,10 +60,8 @@ const VoiceChat = {
     maxLeadMs: 1000,
     speakerTimeoutMs: 1500,
 
-    // Safety limit on a single press
-    maxTransmissionDuration: 30000,
-
-    // How long the mic stays warm after release, so the next press is instant
+    // How long the mic stays warm after being turned off, so turning it back
+    // on again is instant
     micIdleReleaseMs: 30000
   },
 
@@ -272,9 +270,9 @@ const VoiceChat = {
   },
 
   /**
-   * Register a listener for transmission state changes, so the PTT button can
-   * stay in sync when transmission stops for reasons other than a button
-   * release (time limit, backgrounding, microphone error).
+   * Register a listener for transmission state changes, so the microphone
+   * button stays in sync when transmission stops for a reason other than the
+   * player turning it off (backgrounding, microphone error).
    * @param {Function} listener - Called with ('idle'|'starting'|'transmitting')
    */
   onTransmissionStateChange(listener) {
@@ -317,7 +315,7 @@ const VoiceChat = {
   },
 
   /**
-   * Start voice transmission (push-to-talk pressed)
+   * Open the microphone and start streaming
    * @returns {Promise<void>}
    */
   async startTransmission() {
@@ -337,16 +335,16 @@ const VoiceChat = {
     }
 
     // Claim this attempt. stopTransmission() bumps the generation, so if the
-    // user releases the button while we are still waiting on the microphone we
-    // will notice below and abort instead of transmitting unattended.
+    // user turns the microphone off again while we are still waiting for it,
+    // we notice below and abort instead of transmitting unattended.
     const generation = ++this.transmissionGeneration;
 
     this.setState('starting');
 
     try {
-      // A very fast double tap can land here while the previous release is
-      // still flushing its tail; let it finish so the control events stay in
-      // order for receivers.
+      // Turning the microphone straight back on can land here while the
+      // previous stop is still flushing its tail; let it finish so the control
+      // events stay in order for receivers.
       if (this.pendingStop) {
         await this.pendingStop.catch(() => {});
       }
@@ -355,7 +353,7 @@ const VoiceChat = {
       await this.audioCapture.prepare();
 
       if (generation !== this.transmissionGeneration) {
-        console.log('Push-to-talk released before the microphone was ready, aborting');
+        console.log('Microphone turned off again before it was ready, aborting');
 
         // Whoever bumped the generation owns the state now: either a stop that
         // already set it to idle, or a newer press that is starting. Touching
@@ -382,11 +380,6 @@ const VoiceChat = {
 
       this.setState('transmitting');
 
-      this.transmissionTimer = setTimeout(() => {
-        console.log('Maximum transmission duration reached, stopping');
-        this.stopTransmission();
-      }, this.config.maxTransmissionDuration);
-
       console.log('Voice transmission started');
     } catch (error) {
       console.error('Failed to start transmission:', error);
@@ -402,7 +395,7 @@ const VoiceChat = {
   },
 
   /**
-   * Stop voice transmission (push-to-talk released)
+   * Stop streaming and close the microphone
    * @returns {Promise<void>}
    */
   async stopTransmission() {
@@ -421,15 +414,10 @@ const VoiceChat = {
 
     console.log('Stopping voice transmission...');
 
-    if (this.transmissionTimer) {
-      clearTimeout(this.transmissionTimer);
-      this.transmissionTimer = null;
-    }
-
     const duration = this.transmissionStartTime ? Date.now() - this.transmissionStartTime : 0;
     this.transmissionStartTime = null;
 
-    // Leave the transmitting state now so the button releases immediately, but
+    // Leave the transmitting state now so the button updates immediately, but
     // keep sending until the trailing partial frame has been flushed, otherwise
     // the last few milliseconds of speech are lost.
     this.flushingTail = true;
@@ -539,9 +527,9 @@ const VoiceChat = {
       this.showErrorNotification(message, null);
     }
 
-    if (shouldDisablePTT && typeof PTTButton !== 'undefined') {
-      PTTButton.disable();
-      console.log('PTT button disabled due to microphone disconnection');
+    if (shouldDisablePTT && typeof MicButton !== 'undefined') {
+      MicButton.disable();
+      console.log('Microphone button disabled due to microphone disconnection');
     }
   },
 
@@ -577,9 +565,9 @@ const VoiceChat = {
 
     this.showErrorNotification(message, helpLink);
 
-    if (shouldDisablePTT && typeof PTTButton !== 'undefined') {
-      PTTButton.disable();
-      console.log('PTT button disabled due to microphone error');
+    if (shouldDisablePTT && typeof MicButton !== 'undefined') {
+      MicButton.disable();
+      console.log('Microphone button disabled due to microphone error');
     }
   },
 
@@ -634,7 +622,7 @@ const VoiceChat = {
   },
 
   /**
-   * Someone started talking. Registers them so the indicator appears
+   * Someone opened their microphone. Registers them so the indicator appears
    * immediately, before their first audio frame arrives.
    * @param {Object} data - {playerId, username, team}
    */
@@ -689,7 +677,7 @@ const VoiceChat = {
   },
 
   /**
-   * Someone released push-to-talk. Anything already buffered keeps playing;
+   * Someone closed their microphone. Anything already buffered keeps playing;
    * the speaker is retired once it has all been heard.
    * @param {Object} data - {playerId}
    */
@@ -774,8 +762,8 @@ const VoiceChat = {
         }
       }
 
-      if (typeof PTTButton !== 'undefined' && PTTButton.setAvailable) {
-        PTTButton.setAvailable(this.isEnabled);
+      if (typeof MicButton !== 'undefined' && MicButton.setAvailable) {
+        MicButton.setAvailable(this.isEnabled);
       }
 
       this.saveSettings();
@@ -898,8 +886,8 @@ const VoiceChat = {
     console.log('App went to background');
     this.isInBackground = true;
 
-    // Browsers throttle or suspend a hidden page, so a transmission that keeps
-    // "running" would send nothing useful. Stop it and let the button reset.
+    // Browsers throttle or suspend a hidden page, so a microphone left open
+    // would send nothing useful. Close it and let the button reset.
     if (this.state !== 'idle') {
       console.log('Stopping transmission due to background transition');
       this.stopTransmission();
@@ -923,7 +911,7 @@ const VoiceChat = {
   /**
    * Browsers keep an AudioContext suspended until the page sees a user gesture.
    * Keep trying on each interaction until it is actually running, so incoming
-   * audio is audible even before this player has pressed push-to-talk.
+   * audio is audible even before this player has turned their microphone on.
    */
   setupAudioUnlockHandler() {
     if (!this.audioContext) {
@@ -986,11 +974,6 @@ const VoiceChat = {
 
       if (this.state !== 'idle') {
         this.stopTransmission();
-      }
-
-      if (this.transmissionTimer) {
-        clearTimeout(this.transmissionTimer);
-        this.transmissionTimer = null;
       }
 
       if (this.audioCapture) {

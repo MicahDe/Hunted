@@ -93,7 +93,7 @@ const Game = {
     console.log("Initializing voice chat system...");
 
     // Check if voice chat modules are available
-    if (typeof VoiceChat === 'undefined' || typeof PTTButton === 'undefined' || typeof SpeakerIndicator === 'undefined') {
+    if (typeof VoiceChat === 'undefined' || typeof MicButton === 'undefined' || typeof SpeakerIndicator === 'undefined') {
       console.warn("Voice chat modules not available");
       return;
     }
@@ -133,8 +133,8 @@ const Game = {
         return;
       }
 
-      // Initialize PTT button
-      PTTButton.init();
+      // Initialize microphone toggle
+      MicButton.init();
 
       // Initialize speaker indicator
       SpeakerIndicator.init();
@@ -442,8 +442,8 @@ const Game = {
       }
 
       // Clean up UI components
-      if (typeof PTTButton !== 'undefined' && PTTButton.cleanup) {
-        PTTButton.cleanup();
+      if (typeof MicButton !== 'undefined' && MicButton.cleanup) {
+        MicButton.cleanup();
       }
 
       if (typeof SpeakerIndicator !== 'undefined' && SpeakerIndicator.cleanup) {

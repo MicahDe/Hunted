@@ -1,9 +1,9 @@
 /**
  * Voice Chat Handler
  *
- * Relays walkie-talkie voice traffic between players in a room. Audio arrives
- * as small raw PCM frames many times a second while someone holds push-to-talk,
- * so this path is deliberately cheap: validate, relay, and do not log per frame.
+ * Relays voice traffic between players in a room. Audio arrives as small raw
+ * PCM frames many times a second while someone has their microphone open, so
+ * this path is deliberately cheap: validate, relay, and do not log per frame.
  */
 
 // A frame is 16-bit mono PCM. At 16 kHz, 100ms is 3200 bytes; allow generous
@@ -15,16 +15,12 @@ const MAX_FRAME_BYTES = 64 * 1024;
 // client cannot flood the room.
 const MAX_FRAMES_PER_SECOND = 60;
 
-// A transmission this long was almost certainly never ended properly
-const MAX_TRANSMISSION_MS = 60000;
-
 module.exports = function (io, socket, connectedPlayers) {
   // Per-socket relay state
   const voiceState = {
     transmitting: false,
     windowStart: 0,
-    framesInWindow: 0,
-    staleTimer: null
+    framesInWindow: 0
   };
 
   /**
@@ -74,11 +70,6 @@ module.exports = function (io, socket, connectedPlayers) {
    * @param {string} reason - Why the transmission ended, for the log
    */
   function endTransmission(reason) {
-    if (voiceState.staleTimer) {
-      clearTimeout(voiceState.staleTimer);
-      voiceState.staleTimer = null;
-    }
-
     if (!voiceState.transmitting) {
       return;
     }
@@ -115,7 +106,7 @@ module.exports = function (io, socket, connectedPlayers) {
         return socket.emit('error', { message: 'Player not found' });
       }
 
-      // A start without an end (app killed, tab closed mid-press) would leave
+      // A start without an end (app killed, tab closed while live) would leave
       // the previous speaker showing forever
       if (voiceState.transmitting) {
         endTransmission('superseded by a new transmission');
@@ -123,13 +114,11 @@ module.exports = function (io, socket, connectedPlayers) {
 
       const { roomId, playerId, username, team } = playerInfo;
 
+      // A player can leave their microphone on for as long as they like, so
+      // there is no server-side time limit. A client that stops sending without
+      // saying so is covered by the receiver's silence watchdog, and one that
+      // drops off entirely by the disconnect handler below.
       voiceState.transmitting = true;
-
-      // Backstop in case the end event never arrives
-      voiceState.staleTimer = setTimeout(() => {
-        voiceState.staleTimer = null;
-        endTransmission('exceeded maximum duration');
-      }, MAX_TRANSMISSION_MS);
 
       console.log(`Voice transmission started by ${username} (${playerId}) in room ${roomId}`);
 
@@ -202,15 +191,15 @@ module.exports = function (io, socket, connectedPlayers) {
    */
   socket.on('voice_transmission_end', () => {
     try {
-      endTransmission('released');
+      endTransmission('turned off');
     } catch (error) {
       console.error('Error handling voice transmission end:', error);
     }
   });
 
   /**
-   * If a player drops mid-sentence, close their transmission so nobody is left
-   * showing as speaking forever.
+   * If a player drops while their microphone is open, close their transmission
+   * so nobody is left showing as speaking forever.
    *
    * This runs before socketManager's own disconnect handler removes the player
    * from connectedPlayers, because handlers fire in registration order and the
@@ -221,11 +210,6 @@ module.exports = function (io, socket, connectedPlayers) {
       endTransmission('disconnected');
     } catch (error) {
       console.error('Error cleaning up voice transmission on disconnect:', error);
-    }
-
-    if (voiceState.staleTimer) {
-      clearTimeout(voiceState.staleTimer);
-      voiceState.staleTimer = null;
     }
   });
 };

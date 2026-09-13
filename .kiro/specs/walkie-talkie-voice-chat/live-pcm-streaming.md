@@ -6,7 +6,7 @@ Supersedes the "Chunk Accumulation Strategy" section of
 ## Problem
 
 Voice replies felt like they took roughly twice as long as they should. A
-listener heard nothing at all until the speaker released push-to-talk, so a
+listener heard nothing at all until the speaker stopped transmitting, so a
 five second message took five seconds to say and then started playing.
 
 The cause was in `voiceChat.js`: `handleIncomingAudio()` pushed every chunk into
@@ -36,9 +36,9 @@ getUserMedia
                                                           speaker's timeline
 ```
 
-Frames are emitted while the button is still held, so audio starts playing a
-few hundred milliseconds after the speaker starts talking, no matter how long
-they talk for.
+Frames are emitted continuously while the microphone is open, so audio starts
+playing a few hundred milliseconds after the speaker starts talking, no matter
+how long they talk for.
 
 ### Why raw PCM rather than MSE or per-chunk MediaRecorder
 
@@ -98,16 +98,60 @@ boundary.
 
 | Problem | Fix |
 | --- | --- |
-| Releasing push-to-talk before `getUserMedia` resolved left the microphone live for 30 seconds | `startTransmission()` claims a generation number; `stopTransmission()` bumps it, and the pending start aborts |
-| A new `MediaStream` was acquired on every press and never released | The stream is opened once and kept warm, then released after `micIdleReleaseMs` of inactivity |
+| Turning the microphone off before `getUserMedia` resolved left it live for 30 seconds | `startTransmission()` claims a generation number; `stopTransmission()` bumps it, and the pending start aborts |
+| A new `MediaStream` was acquired every time and never released | The stream is opened once and kept warm, then released after `micIdleReleaseMs` of inactivity |
 | Every chunk passed an ack callback the server never answered, retaining an entry in `socket.acks` forever | Acks removed; audio is sent with `volatile.emit` so nothing is queued for a disconnected socket |
 | Retry logic wrapped `socket.emit` in try/catch, which never throws on network failure | Removed |
 | `adjustMobileAudioSettings()` mutated the config after `AudioCapture` had already copied it | Mobile settings are applied before the audio components are constructed |
 | You appeared as your own speaker, because start/end were broadcast with `io.to(room)` | Server uses `socket.to(room)` throughout, and the client also filters on its own `playerId` |
 | A player dropping mid-sentence left the speaker indicator stuck forever | The server closes the transmission on `disconnect` |
 | The speaker indicator was driven per network packet and handled one speaker | Driven by playback start/end, and tracks a set of speakers |
-| Separate mouse and touch handlers, no pointer capture, no keyboard support | Pointer Events with capture, plus space/enter hold, window blur and visibility fallbacks |
+| Separate mouse and touch handlers, no pointer capture, no keyboard support | Replaced by the microphone toggle described below |
 | No limits on relayed audio | Frame size cap and a per-socket rate limit |
+
+## From hold-to-talk to a microphone toggle
+
+The original control was a hold-to-talk button: press and hold to transmit.
+It had a defect that made it unusable in practice. Two rules in
+`voiceChat.css`, in the iOS `@supports` block and the Android `@media` block,
+set `touch-action: manipulation` on the button. Both come later in the file than
+the `touch-action: none` the pointer handling relied on, at equal specificity,
+so they won on every phone. `manipulation` still permits panning, so any thumb
+movement let the browser claim the touch as a scroll gesture and fire
+`pointercancel`, which the handler correctly read as a release. Transmission
+stopped if the user's thumb drifted at all.
+
+Rather than fight the gesture, the control became a toggle: tap to open the
+microphone, tap again to close it. The microphone starts closed and only ever
+opens because someone tapped the button.
+
+- The button listens for `click`, not raw pointer events. The browser decides
+  what counts as a tap, so thumb drift is tolerated, and Enter/Space on a
+  focused `<button>` arrive through the same path for free.
+- `touch-action: manipulation` is now the right value and is left alone.
+- The 30 second cap on a single transmission is gone, client and server. It made
+  sense when a transmission lasted as long as a button was held; on a latched
+  microphone it would silently mute someone mid-conversation. A client that
+  stops sending without saying so is still covered by the receiver's silence
+  watchdog, and one that drops off entirely by the server's disconnect handler.
+- The microphone still closes by itself when the app is backgrounded, when the
+  device disappears, and when voice chat is switched off in settings. The button
+  mirrors `VoiceChat`'s state rather than tracking its own, so it cannot claim to
+  be open after transmission has stopped for any of those reasons.
+
+### Consequence: it is an open channel
+
+While the microphone is on, everything is transmitted: roughly 32 KB/s
+continuously, and teammates hear background noise for as long as it is open.
+That is the deliberate trade for a predictable control. The live state is made
+unmissable (red button, "LIVE", a struck-through mic icon when closed) because
+forgetting you are open matters in this game, where a runner broadcasting to
+hunters is a real cost.
+
+If continuous transmission turns out to be too expensive, the place to add voice
+activity detection is `AudioCapture.emitFrame()`: compute the frame's RMS and
+skip the send below a threshold, with a hang time of a few hundred milliseconds
+so word endings are not clipped.
 
 ## Tests
 
@@ -122,7 +166,7 @@ boundary.
 - `test/voiceChat.test.js` — the transmission state machine, the release-during-
   acquisition race, tail flush ordering, self-echo filtering, background
   handling
-- `test/pttButton.test.js` — press/release bookkeeping and every path that must
-  release the microphone
+- `test/micButton.test.js` — toggle bookkeeping, and every path that must leave
+  the microphone closed
 - `test/voiceChatHandler.test.js` — relay scope, validation, rate limiting,
   disconnect cleanup
