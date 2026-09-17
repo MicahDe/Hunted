@@ -450,7 +450,6 @@ textarea:focus {
   width: 100%;
   margin-bottom: var(--spacing-2);
   border: 1px solid var(--color-border);
-  filter: grayscale(0.8) contrast(1.2) brightness(0.9);
 }
 
 .location-info {
@@ -492,7 +491,6 @@ textarea:focus {
   width: 100%;
   margin-bottom: var(--spacing-2);
   border: 1px solid var(--color-border);
-  filter: grayscale(0.8) contrast(1.2) brightness(0.9);
 }
 
 .hunter-title {
@@ -961,6 +959,17 @@ textarea:focus {
 }
 
 /* Map Customizations */
+
+/* Dark maps: OpenStreetMap tiles inverted and desaturated to match the app theme.
+   Only the tiles are filtered, so markers, trails and zones keep their true colours. */
+.leaflet-container {
+  background-color: var(--color-background);
+}
+
+.leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) grayscale(0.85) brightness(0.8) contrast(1.05);
+}
+
 .leaflet-control-attribution {
   font-family: var(--font-family-mono);
   font-size: 9px;
@@ -1008,7 +1017,7 @@ textarea:focus {
 }
 
 .map-marker-runner {
-  background-color: var(--color-runner);
+  background-color: var(--runner-color, var(--color-runner));
 }
 
 .map-marker-target {
@@ -1022,6 +1031,11 @@ textarea:focus {
   height: 70%;
   object-fit: contain;
   filter: brightness(0) invert(1);
+}
+
+/* A dark figure reads better than white on every runner colour */
+.map-marker-runner img {
+  filter: brightness(0);
 }
 
 /* Map circle styling */
@@ -1103,27 +1117,36 @@ textarea:focus {
   color: var(--color-error);
 }
 
-/* Runner trails: a line per sighting, dotted links between sightings, and a heading arrow */
+/* Each runner's map colour beside their name in the game menu, as a legend for the trails */
+.player-color {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: var(--spacing-2);
+  border-radius: 50%;
+  background-color: var(--runner-color);
+  vertical-align: middle;
+}
+
+/* Runner trails: a line per sighting, dotted links between sightings, and a heading arrow.
+   Line and dot colours are each runner's own, set from map.js. */
 .trail-line-casing {
-  stroke: #fff;
+  stroke: var(--color-background);
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .trail-line {
-  stroke: var(--color-runner);
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .trail-gap {
-  stroke: var(--color-runner);
   stroke-linecap: round;
 }
 
 .trail-sighting-dot {
-  stroke: #fff;
-  fill: var(--color-runner);
+  stroke: var(--color-background);
 }
 
 .trail-sighting-label-container,
@@ -1138,7 +1161,8 @@ textarea:focus {
   font-size: 10px;
   color: white;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.8);
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: rgba(0, 0, 0, 0.6);
+  border-left: 3px solid var(--runner-color, transparent);
   border-radius: 3px;
   padding: 1px 4px;
   white-space: nowrap;
@@ -1163,8 +1187,8 @@ textarea:focus {
   height: 0;
   border-left: 10px solid transparent;
   border-right: 10px solid transparent;
-  border-bottom: 17px solid var(--color-runner);
-  filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);
+  border-bottom: 17px solid var(--runner-color, var(--color-runner));
+  filter: drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000);
 }
 
 .runner-label-container {
@@ -1176,7 +1200,8 @@ textarea:focus {
   font-size: 10px;
   color: white;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.8);
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: rgba(0, 0, 0, 0.6);
+  border-left: 3px solid var(--runner-color, transparent);
   border-radius: 3px;
   padding: 2px 5px;
   white-space: nowrap;

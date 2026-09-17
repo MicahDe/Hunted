@@ -262,6 +262,7 @@ module.exports = function (io, db) {
               lng,
             },
             lastPingTime: now,
+            colorIndex: getRunnerColorIndexes(await getRoomPlayers(roomId))[playerId],
             trail: await getRunnerTrail(playerId, { lat, lng, timestamp: now }),
           };
 
@@ -651,6 +652,28 @@ module.exports = function (io, db) {
     return trailUtils.buildTrail(rows, now, config.game.trail);
   }
 
+  // All players in a room, in the order they joined
+  async function getRoomPlayers(roomId) {
+    return new Promise((resolve, reject) => {
+      db.all("SELECT * FROM players WHERE room_id = ? ORDER BY rowid", [roomId], (err, rows) => {
+        if (err) reject(err);
+        resolve(rows || []);
+      });
+    });
+  }
+
+  // Each runner's map colour slot, numbered in the order they joined. Caught runners keep their
+  // slot so nobody else's colour changes mid-game. Takes players in join order (see getRoomPlayers).
+  function getRunnerColorIndexes(players) {
+    const indexes = {};
+    players
+      .filter((player) => player.team === "runner" || player.status === "caught")
+      .forEach((player, index) => {
+        indexes[player.player_id] = index;
+      });
+    return indexes;
+  }
+
   async function getTeamPlayers(roomId, team, status = null) {
     return new Promise((resolve, reject) => {
       let query = "SELECT * FROM players WHERE room_id = ? AND team = ?";
@@ -695,12 +718,8 @@ module.exports = function (io, db) {
       }
 
       // Get all players in the room
-      const players = await new Promise((resolve, reject) => {
-        db.all("SELECT * FROM players WHERE room_id = ?", [roomId], (err, rows) => {
-          if (err) reject(err);
-          resolve(rows || []);
-        });
-      });
+      const players = await getRoomPlayers(roomId);
+      const runnerColorIndexes = getRunnerColorIndexes(players);
 
       // Get trails for all runners
       const runnerTrails = {};
@@ -718,6 +737,7 @@ module.exports = function (io, db) {
               lng: runner.last_lng,
             },
             lastPingTime: runner.last_ping_time,
+            colorIndex: runnerColorIndexes[runner.player_id],
             trail,
           };
         }
@@ -772,6 +792,7 @@ module.exports = function (io, db) {
           lng: player.last_lng,
         },
         lastPingTime: player.last_ping_time,
+        colorIndex: runnerColorIndexes[player.player_id] ?? null,
       }));
 
       // Construct game state

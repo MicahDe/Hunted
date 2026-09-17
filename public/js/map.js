@@ -42,6 +42,9 @@ const GameMap = {
   // Latest details of other players, so labels can update between pings
   playerDataCache: {},
 
+  // Runner map colours, read from variables.css
+  runnerColors: [],
+
   // Map icons
   icons: {
     runner: null,
@@ -55,6 +58,20 @@ const GameMap = {
   init: function () {
     // Create custom icons
     this.createIcons();
+
+    // Keep the runner palette in one place (variables.css)
+    const styles = getComputedStyle(document.documentElement);
+    for (let slot = 1; styles.getPropertyValue(`--runner-color-${slot}`).trim(); slot++) {
+      this.runnerColors.push(styles.getPropertyValue(`--runner-color-${slot}`).trim());
+    }
+  },
+
+  // A runner's map colour for their colour slot. Colours repeat once every one is in use.
+  runnerColor: function (colorIndex) {
+    if (colorIndex == null || this.runnerColors.length === 0) {
+      return getComputedStyle(document.documentElement).getPropertyValue("--color-runner").trim();
+    }
+    return this.runnerColors[colorIndex % this.runnerColors.length];
   },
 
   // Create custom icons for map markers
@@ -281,9 +298,9 @@ const GameMap = {
     if (gameState.team === "hunter") {
       this.boundaryCircle = L.circle([centerLat, centerLng], {
         radius: playAreaRadius,
-        color: "#2a3990",
+        color: "#999999", // Light enough to see on the dark map
         fillColor: "#ffffff",
-        fillOpacity: 0.1,
+        fillOpacity: 0.04,
         weight: 2,
         dashArray: "5, 10",
       }).addTo(this.gameMap);
@@ -400,9 +417,9 @@ const GameMap = {
     // Add game boundary circle
     L.circle([centerLat, centerLng], {
       radius: playAreaRadius,
-      color: "#2a3990",
-      fillColor: "#2a3990",
-      fillOpacity: 0.1,
+      color: "#999999", // Light enough to see on the dark map
+      fillColor: "#ffffff",
+      fillOpacity: 0.04,
       weight: 2,
       dashArray: "5, 10",
     }).addTo(this.lobbyMap);
@@ -507,14 +524,14 @@ const GameMap = {
     if (!this.gameMap) return;
     if (player.playerId === gameState.playerId) return;
 
-    const { playerId, username, team, location, lastPingTime, trail } = player;
+    const { playerId, username, team, location, lastPingTime, colorIndex, trail } = player;
     const lat = location?.lat;
     const lng = location?.lng;
 
     if (!lat || !lng) return;
 
     // Cache what the label timer needs to keep "ago" times counting up between pings
-    this.playerDataCache[playerId] = { username, team, lastPingTime, location: { lat, lng } };
+    this.playerDataCache[playerId] = { username, team, lastPingTime, colorIndex, location: { lat, lng } };
 
     // Select icon based on team
     const playerIcon = team === "hunter" ? this.icons.hunter : this.icons.runner;
@@ -547,6 +564,17 @@ const GameMap = {
       }).addTo(this.gameMap);
     }
 
+    // Runners' markers and labels wear their own colour, matching their trail
+    const color = team === "runner" ? this.runnerColor(colorIndex) : null;
+    [this.runnerMarkers[playerId].getElement(), this.runnerLabels[playerId].getElement()].forEach((element) => {
+      if (!element) return;
+      if (color) {
+        element.style.setProperty("--runner-color", color);
+      } else {
+        element.style.removeProperty("--runner-color");
+      }
+    });
+
     // Only runners leave a trail, so a caught runner who is now a hunter loses theirs
     if (team !== "runner") {
       this.removeRunnerTrail(playerId);
@@ -567,6 +595,7 @@ const GameMap = {
 
     const layer = L.layerGroup().addTo(this.gameMap);
     const lastIndex = trail.sightings.length - 1;
+    const color = this.runnerColor(player.colorIndex);
 
     const sightings = trail.sightings.map((sighting, index) => {
       const drawn = { end: sighting.end };
@@ -577,6 +606,7 @@ const GameMap = {
         const previous = trail.sightings[index - 1].points;
         drawn.gap = L.polyline([previous[previous.length - 1], sighting.points[0]], {
           className: "trail-gap",
+          color,
           weight: 3,
           dashArray: "1, 8",
           interactive: false,
@@ -593,6 +623,7 @@ const GameMap = {
 
         drawn.line = L.polyline(sighting.points, {
           className: "trail-line",
+          color,
           weight: 4,
           interactive: false,
         }).addTo(layer);
@@ -602,6 +633,7 @@ const GameMap = {
       if (index < lastIndex) {
         drawn.dot = L.circleMarker(endPoint, {
           className: "trail-sighting-dot",
+          fillColor: color,
           radius: 5,
           weight: 2,
         })
@@ -613,7 +645,7 @@ const GameMap = {
           drawn.label = L.marker(endPoint, {
             icon: L.divIcon({
               className: "trail-sighting-label-container",
-              html: `<div class="trail-sighting-label"></div>`,
+              html: `<div class="trail-sighting-label" style="--runner-color: ${color}"></div>`,
               iconSize: [60, 16],
               iconAnchor: [-8, 8],
             }),
@@ -629,7 +661,7 @@ const GameMap = {
       L.marker([player.location.lat, player.location.lng], {
         icon: L.divIcon({
           className: "trail-heading-container",
-          html: `<div class="trail-heading" style="transform: rotate(${trail.heading}deg)"><div class="trail-heading-arrow"></div></div>`,
+          html: `<div class="trail-heading" style="transform: rotate(${trail.heading}deg); --runner-color: ${color}"><div class="trail-heading-arrow"></div></div>`,
           iconSize: [80, 80],
           iconAnchor: [40, 40],
         }),
@@ -801,7 +833,7 @@ const GameMap = {
 
           // Use different colors for active vs inactive zones
           const circleColor = isActive ? "#4caf50" : "#ef7d54";
-          const fillOpacity = 0.3;
+          const fillOpacity = 0.12; // A heavier fill muddies the dark map and hides trails
           const dashArray = isActive ? null : "5, 5";
 
           // Create circle with the specified radius at the calculated position
