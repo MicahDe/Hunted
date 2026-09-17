@@ -76,12 +76,12 @@ const GameMap = {
 
   // Create custom icons for map markers
   createIcons: function () {
-    // Player icon is customized based on current location
+    // Your own location: a precise point with a live pulse, so it never reads as a team marker
     this.icons.player = L.divIcon({
       className: "map-marker-player",
-      html: `<img src="assets/icons/self-location.svg" alt="Self Location">`,
-      iconSize: [32, 32],
-      iconAnchor: [16, 16],
+      html: `<span class="player-dot-pulse"></span><span class="player-dot"></span>`,
+      iconSize: [34, 34],
+      iconAnchor: [17, 17],
     });
 
     // Runner icon
