@@ -450,7 +450,6 @@ textarea:focus {
   width: 100%;
   margin-bottom: var(--spacing-2);
   border: 1px solid var(--color-border);
-  filter: grayscale(0.8) contrast(1.2) brightness(0.9);
 }
 
 .location-info {
@@ -492,7 +491,6 @@ textarea:focus {
   width: 100%;
   margin-bottom: var(--spacing-2);
   border: 1px solid var(--color-border);
-  filter: grayscale(0.8) contrast(1.2) brightness(0.9);
 }
 
 .hunter-title {
@@ -617,7 +615,7 @@ textarea:focus {
 
 .game-controls {
   padding: var(--spacing-2);
-  bottom: 0;
+  bottom: var(--map-attribution-height); /* Keep the map credit line visible */
   left: 0;
   right: 0;
   position: absolute;
@@ -961,6 +959,17 @@ textarea:focus {
 }
 
 /* Map Customizations */
+
+/* Dark maps: OpenStreetMap tiles inverted and desaturated to match the app theme.
+   Only the tiles are filtered, so markers, trails and zones keep their true colours. */
+.leaflet-container {
+  background-color: var(--color-background);
+}
+
+.leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) grayscale(0.85) brightness(0.8) contrast(1.05);
+}
+
 .leaflet-control-attribution {
   font-family: var(--font-family-mono);
   font-size: 9px;
@@ -986,9 +995,52 @@ textarea:focus {
   border-radius: 0 !important;
 }
 
+/* Your own location: a precise white point with a pulse, distinct from the team markers */
 .map-marker-player {
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+  position: relative;
+}
+
+.map-marker-player .player-dot,
+.map-marker-player .player-dot-pulse {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.map-marker-player .player-dot {
+  width: 18px;
+  height: 18px;
+  background-color: var(--color-text-on-dark);
+  border: 4px solid var(--color-background);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5), 0 0 8px rgba(0, 0, 0, 0.7);
+}
+
+.map-marker-player .player-dot-pulse {
+  width: 34px;
+  height: 34px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  animation: player-pulse 2.4s ease-out infinite;
+}
+
+@keyframes player-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.5);
+    opacity: 0.7;
+  }
+
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-marker-player .player-dot-pulse {
+    animation: none;
+    opacity: 0.3;
+  }
 }
 
 /* Map Markers */
@@ -1008,7 +1060,7 @@ textarea:focus {
 }
 
 .map-marker-runner {
-  background-color: var(--color-runner);
+  background-color: var(--runner-color, var(--color-runner));
 }
 
 .map-marker-target {
@@ -1022,6 +1074,11 @@ textarea:focus {
   height: 70%;
   object-fit: contain;
   filter: brightness(0) invert(1);
+}
+
+/* A dark figure reads better than white on every runner colour */
+.map-marker-runner img {
+  filter: brightness(0);
 }
 
 /* Map circle styling */
@@ -1103,47 +1160,78 @@ textarea:focus {
   color: var(--color-error);
 }
 
-/* Runner history trail and markers */
-.history-marker {
+/* Each runner's map colour beside their name in the game menu, as a legend for the trails */
+.player-color {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: var(--spacing-2);
+  border-radius: 50%;
+  background-color: var(--runner-color);
+  vertical-align: middle;
+}
+
+/* Runner trails: a line per sighting, dotted links between sightings, and a heading arrow.
+   Line and dot colours are each runner's own, set from map.js. */
+.trail-line-casing {
+  stroke: var(--color-background);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trail-line {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trail-gap {
+  stroke-linecap: round;
+}
+
+.trail-sighting-dot {
+  stroke: var(--color-background);
+}
+
+.trail-sighting-label-container,
+.trail-heading-container {
   background: transparent;
   border: none;
+  pointer-events: none;
 }
 
-.history-marker-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background-color: var(--color-runner);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
-}
-
-.history-marker-runner {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.8);
-  border: 1px solid var(--color-runner);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto;
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
-}
-
-.history-marker-runner img {
-  width: 12px;
-  height: 12px;
-}
-
-.history-marker-label {
-  font-size: 8px;
+.trail-sighting-label {
+  display: inline-block;
+  font-size: 10px;
   color: white;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.8);
-  text-align: center;
-  margin-top: 3px;
+  background-color: rgba(0, 0, 0, 0.6);
+  border-left: 3px solid var(--runner-color, transparent);
+  border-radius: 3px;
+  padding: 1px 4px;
   white-space: nowrap;
-  pointer-events: none;
+}
+
+.trail-labels-hidden .trail-sighting-label {
+  display: none;
+}
+
+.trail-heading {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.trail-heading-arrow {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-bottom: 17px solid var(--runner-color, var(--color-runner));
+  filter: drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000);
 }
 
 .runner-label-container {
@@ -1155,7 +1243,8 @@ textarea:focus {
   font-size: 10px;
   color: white;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.8);
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: rgba(0, 0, 0, 0.6);
+  border-left: 3px solid var(--runner-color, transparent);
   border-radius: 3px;
   padding: 2px 5px;
   white-space: nowrap;
@@ -1169,19 +1258,20 @@ textarea:focus {
 }
 
 .player-label {
-  font-size: 12px;
+  font-size: 11px;
   color: white;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.8);
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(0, 0, 0, 0.6);
+  border-left: 3px solid var(--color-text-on-dark);
   border-radius: 3px;
-  padding: 3px 7px;
+  padding: 2px 6px;
   white-space: nowrap;
   text-align: center;
   pointer-events: none;
   font-weight: bold;
 }
 
-/* Customize Leaflet tooltips for history markers */
+/* Customize Leaflet tooltips for trail sightings */
 .leaflet-tooltip {
   background-color: rgba(0, 0, 0, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.2);

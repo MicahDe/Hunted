@@ -197,7 +197,7 @@ const UI = {
       listItem.className = "player-item team-runner";
       listItem.setAttribute("data-player-id", runner.playerId);
       listItem.innerHTML = `
-                <span class="player-name">${runner.username}</span>
+                <span class="player-name"><span class="player-color" style="--runner-color: ${GameMap.runnerColor(runner.colorIndex)}"></span>${runner.username}</span>
                 ${runner.status === "caught" ? '<span class="player-status caught">Caught</span>' : runner.status === "won" ? '<span class="player-status won">Won</span>' : ""}
             `;
       runnerList.appendChild(listItem);

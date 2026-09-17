@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require("uuid");
 const geoUtils = require("../../shared/utils/geoUtils");
+const trailUtils = require("../../shared/utils/trailUtils");
 const config = require("../config/default");
 const voiceChatHandler = require("./voiceChatHandler");
 
@@ -241,6 +242,7 @@ module.exports = function (io, db) {
         }
 
         const { roomId, playerId, username, team } = playerInfo;
+        const now = Date.now();
 
         // Update player location in database
         await updatePlayerLocation(playerId, lat, lng);
@@ -249,9 +251,6 @@ module.exports = function (io, db) {
         if (team === "runner") {
           // Store location in history
           await storeLocationHistory(playerId, roomId, lat, lng);
-
-          // Get location history for this player
-          const locationHistory = await getPlayerLocationHistory(playerId);
 
           // Broadcast runner location to all players in the room
           const locationData = {
@@ -262,8 +261,9 @@ module.exports = function (io, db) {
               lat,
               lng,
             },
-            lastPingTime: Date.now(),
-            locationHistory: locationHistory, // Include history
+            lastPingTime: now,
+            colorIndex: getRunnerColorIndexes(await getRoomPlayers(roomId))[playerId],
+            trail: await getRunnerTrail(playerId, { lat, lng, timestamp: now }),
           };
 
           io.to(roomId).emit("runner_location", locationData);
@@ -372,8 +372,8 @@ module.exports = function (io, db) {
               lat,
               lng,
             },
-            lastPingTime: Date.now(),
-            locationHistory: null,
+            lastPingTime: now,
+            trail: null,
           };
           
           io.to(roomId).emit("runner_location", locationData);
@@ -401,6 +401,13 @@ module.exports = function (io, db) {
 
         // Change team to hunter
         await updatePlayerTeam(caughtPlayerId, "hunter");
+
+        // Their open connection should ping as a hunter from now on too
+        connectedPlayers.forEach((info) => {
+          if (info.playerId === caughtPlayerId) {
+            info.team = "hunter";
+          }
+        });
 
         // Get player info
         const caughtPlayer = await getPlayerById(caughtPlayerId);
@@ -623,31 +630,48 @@ module.exports = function (io, db) {
     });
   }
 
-  // Get location history for a player (last 30 minutes)
-  async function getPlayerLocationHistory(playerId) {
-    const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
+  // Get a runner's trail (sightings and heading) over the configured window.
+  // latestPing is their most recent location, which history may have skipped as too close to the last point.
+  async function getRunnerTrail(playerId, latestPing) {
+    const now = Date.now();
+    const since = now - config.game.trail.windowMs;
 
-    return new Promise((resolve, reject) => {
-      db.all("SELECT lat, lng, timestamp FROM location_history WHERE player_id = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT 20", [playerId, thirtyMinutesAgo], function (err, rows) {
+    const rows = await new Promise((resolve, reject) => {
+      db.all("SELECT lat, lng, timestamp FROM location_history WHERE player_id = ? AND timestamp > ? ORDER BY timestamp ASC", [playerId, since], function (err, rows) {
         if (err) reject(err);
-        
-        // Filter out points less than 20 seconds apart and limit to 5
-        const filtered = [];
-        let lastTimestamp = null;
-        
-        for (const row of rows || []) {
-          if (lastTimestamp === null || (lastTimestamp - row.timestamp) >= 20000) {
-            filtered.push(row);
-            lastTimestamp = row.timestamp;
-            
-            if (filtered.length >= 5) break;
-          }
-        }
-        
-        // Reverse to get chronological order
-        resolve(filtered.reverse());
+        resolve(rows || []);
       });
     });
+
+    // End the trail exactly where the runner's marker is
+    const lastRow = rows[rows.length - 1];
+    if (latestPing && latestPing.lat != null && latestPing.lng != null && (!lastRow || (latestPing.timestamp > lastRow.timestamp && (latestPing.lat !== lastRow.lat || latestPing.lng !== lastRow.lng)))) {
+      rows.push(latestPing);
+    }
+
+    return trailUtils.buildTrail(rows, now, config.game.trail);
+  }
+
+  // All players in a room, in the order they joined
+  async function getRoomPlayers(roomId) {
+    return new Promise((resolve, reject) => {
+      db.all("SELECT * FROM players WHERE room_id = ? ORDER BY rowid", [roomId], (err, rows) => {
+        if (err) reject(err);
+        resolve(rows || []);
+      });
+    });
+  }
+
+  // Each runner's map colour slot, numbered in the order they joined. Caught runners keep their
+  // slot so nobody else's colour changes mid-game. Takes players in join order (see getRoomPlayers).
+  function getRunnerColorIndexes(players) {
+    const indexes = {};
+    players
+      .filter((player) => player.team === "runner" || player.status === "caught")
+      .forEach((player, index) => {
+        indexes[player.player_id] = index;
+      });
+    return indexes;
   }
 
   async function getTeamPlayers(roomId, team, status = null) {
@@ -694,22 +718,17 @@ module.exports = function (io, db) {
       }
 
       // Get all players in the room
-      const players = await new Promise((resolve, reject) => {
-        db.all("SELECT * FROM players WHERE room_id = ?", [roomId], (err, rows) => {
-          if (err) reject(err);
-          resolve(rows || []);
-        });
-      });
+      const players = await getRoomPlayers(roomId);
+      const runnerColorIndexes = getRunnerColorIndexes(players);
 
-      // Get location history for all runners
-      const runnerLocationHistory = {};
+      // Get trails for all runners
+      const runnerTrails = {};
       const runnerPlayers = players.filter((player) => player.team === "runner");
 
-      // Get location history for each runner
       for (const runner of runnerPlayers) {
-        const history = await getPlayerLocationHistory(runner.player_id);
-        if (history && history.length > 0) {
-          runnerLocationHistory[runner.player_id] = {
+        const trail = await getRunnerTrail(runner.player_id, { lat: runner.last_lat, lng: runner.last_lng, timestamp: runner.last_ping_time });
+        if (trail.sightings.length > 0) {
+          runnerTrails[runner.player_id] = {
             playerId: runner.player_id,
             username: runner.username,
             team: "runner",
@@ -718,7 +737,8 @@ module.exports = function (io, db) {
               lng: runner.last_lng,
             },
             lastPingTime: runner.last_ping_time,
-            locationHistory: history,
+            colorIndex: runnerColorIndexes[runner.player_id],
+            trail,
           };
         }
       }
@@ -772,6 +792,7 @@ module.exports = function (io, db) {
           lng: player.last_lng,
         },
         lastPingTime: player.last_ping_time,
+        colorIndex: runnerColorIndexes[player.player_id] ?? null,
       }));
 
       // Construct game state
@@ -789,7 +810,7 @@ module.exports = function (io, db) {
         status: room.status,
         players: formattedPlayers,
         targets: formattedTargets,
-        runnerLocationHistory: runnerLocationHistory,
+        runnerTrails: runnerTrails,
       };
 
       return gameState;

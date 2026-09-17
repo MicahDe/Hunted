@@ -58,9 +58,9 @@ const Game = {
       })
     }
 
-    // Initialize runner locations if available in the game state
-    if (initialState.runnerLocationHistory) {
-      Object.values(initialState.runnerLocationHistory).forEach((runnerData) => {
+    // Draw runner trails if available in the game state
+    if (initialState.runnerTrails) {
+      Object.values(initialState.runnerTrails).forEach((runnerData) => {
         GameMap.updateOtherPlayerLocation(runnerData);
       });
     }

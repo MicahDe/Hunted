@@ -39,7 +39,7 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 **For Hunters:**
 - Keep your app open at all times to share your location and coordinate with your team
 - Track Runner locations in real-time as they ping
-- See the location history of all Runners on your map
+- Follow each Runner's trail from the last hour, including which way they were last heading
 - Catch Runners by taking their photo (share proof in your group chat!)
 - Caught Runners become Hunters, growing your team
 

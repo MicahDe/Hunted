@@ -33,6 +33,8 @@
     z-index: var(--z-index-above);
     min-width: 80px;
     min-height: 80px;
+    /* Lifts the button clear of the map credit line at every breakpoint's bottom offset */
+    margin-bottom: var(--map-attribution-height);
 }
 
 /* Show PTT button only on game screen */

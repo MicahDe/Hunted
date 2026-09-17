@@ -110,6 +110,19 @@
   --hunter-color-bg: rgb(208, 25, 28); /* rgba(179, 0, 0, 0.2) */
   --runner-color-bg: rgba(8, 156, 236); /* rgba(0, 68, 102, 0.2) */
 
+  /* Runner colours on the map, in the order runners are assigned them. Checked against the dark
+     map for colour-blind separation: any two of the first three are distinct, all five are distinct
+     from hunter red and your own green dot. Past five runners they repeat, so names stay the
+     reliable way to tell runners apart. */
+  --runner-color-1: #3987e5; /* blue */
+  --runner-color-2: #199e70; /* aqua */
+  --runner-color-3: #c98500; /* yellow */
+  --runner-color-4: #d55181; /* magenta */
+  --runner-color-5: #9085e9; /* violet */
+
+  /* Room left along the bottom of the game map for the map credit line */
+  --map-attribution-height: 14px;
+
   --map-height-mobile: calc(100vh - 140px);
   --map-height-desktop: calc(100vh - 160px);
 }
