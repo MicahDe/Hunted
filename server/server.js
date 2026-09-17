@@ -103,6 +103,9 @@ function initDatabase() {
             FOREIGN KEY(player_id) REFERENCES players(player_id) ON DELETE CASCADE,
             FOREIGN KEY(room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
         )`);
+
+    // Runner trails are read on every runner ping
+    db.run(`CREATE INDEX IF NOT EXISTS idx_location_history_player_time ON location_history (player_id, timestamp)`);
   });
 }
 

@@ -1103,47 +1103,68 @@ textarea:focus {
   color: var(--color-error);
 }
 
-/* Runner history trail and markers */
-.history-marker {
+/* Runner trails: a line per sighting, dotted links between sightings, and a heading arrow */
+.trail-line-casing {
+  stroke: #fff;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trail-line {
+  stroke: var(--color-runner);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trail-gap {
+  stroke: var(--color-runner);
+  stroke-linecap: round;
+}
+
+.trail-sighting-dot {
+  stroke: #fff;
+  fill: var(--color-runner);
+}
+
+.trail-sighting-label-container,
+.trail-heading-container {
   background: transparent;
   border: none;
+  pointer-events: none;
 }
 
-.history-marker-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background-color: var(--color-runner);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
-}
-
-.history-marker-runner {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.8);
-  border: 1px solid var(--color-runner);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto;
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
-}
-
-.history-marker-runner img {
-  width: 12px;
-  height: 12px;
-}
-
-.history-marker-label {
-  font-size: 8px;
+.trail-sighting-label {
+  display: inline-block;
+  font-size: 10px;
   color: white;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.8);
-  text-align: center;
-  margin-top: 3px;
+  background-color: rgba(0, 0, 0, 0.4);
+  border-radius: 3px;
+  padding: 1px 4px;
   white-space: nowrap;
-  pointer-events: none;
+}
+
+.trail-labels-hidden .trail-sighting-label {
+  display: none;
+}
+
+.trail-heading {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.trail-heading-arrow {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-bottom: 17px solid var(--color-runner);
+  filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);
 }
 
 .runner-label-container {
@@ -1181,7 +1202,7 @@ textarea:focus {
   font-weight: bold;
 }
 
-/* Customize Leaflet tooltips for history markers */
+/* Customize Leaflet tooltips for trail sightings */
 .leaflet-tooltip {
   background-color: rgba(0, 0, 0, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.2);

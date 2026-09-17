@@ -36,6 +36,28 @@ module.exports = {
 
     // Location update throttle in milliseconds (prevent abuse)
     locationUpdateThrottle: 10000,
+
+    // Runner trails shown on other players' maps (see shared/utils/trailUtils.js)
+    trail: {
+      // How far back trails go - roughly the length of a game.
+      // If modifying this, also modify TRAIL_WINDOW_MS in map.js
+      windowMs: 60 * 60 * 1000,
+
+      // A longer gap between pings means the runner closed the app.
+      // Must stay comfortably above the 30s location timer an open app pings on.
+      sightingGapMs: 90 * 1000,
+
+      // Pings closer than this to the last kept point are treated as GPS jitter or loitering
+      minStepMeters: 25,
+
+      // Route detail kept within each sighting
+      simplifyToleranceMeters: 12,
+      maxPointsPerSighting: 4,
+
+      // Only show a direction arrow if the runner covered this distance within headingMaxAgeMs
+      headingMinDistanceMeters: 40,
+      headingMaxAgeMs: 2 * 60 * 1000,
+    },
   },
 
   // Security config
