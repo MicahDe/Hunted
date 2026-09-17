@@ -120,6 +120,9 @@
   --runner-color-4: #d55181; /* magenta */
   --runner-color-5: #9085e9; /* violet */
 
+  /* Room left along the bottom of the game map for the map credit line */
+  --map-attribution-height: 14px;
+
   --map-height-mobile: calc(100vh - 140px);
   --map-height-desktop: calc(100vh - 160px);
 }

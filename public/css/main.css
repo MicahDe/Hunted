@@ -615,7 +615,7 @@ textarea:focus {
 
 .game-controls {
   padding: var(--spacing-2);
-  bottom: 0;
+  bottom: var(--map-attribution-height); /* Keep the map credit line visible */
   left: 0;
   right: 0;
   position: absolute;

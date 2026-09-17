@@ -284,6 +284,13 @@ const GameMap = {
       })
       .addTo(this.gameMap);
 
+    // Add attribution control (OpenStreetMap's licence requires the credit to be visible)
+    L.control
+      .attribution({
+        position: "bottomright",
+      })
+      .addTo(this.gameMap);
+
     // Hide trail sighting labels when zoomed out
     const updateTrailLabelVisibility = () => {
       mapContainer.classList.toggle("trail-labels-hidden", this.gameMap.getZoom() < MIN_TRAIL_LABEL_ZOOM);
@@ -404,6 +411,13 @@ const GameMap = {
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(this.lobbyMap);
+
+    // Add attribution control (OpenStreetMap's licence requires the credit to be visible)
+    L.control
+      .attribution({
+        position: "bottomright",
+      })
+      .addTo(this.lobbyMap);
 
     // Force map to update size
     this.lobbyMap.invalidateSize();
