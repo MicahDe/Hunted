@@ -24,8 +24,10 @@ module.exports = {
     // minutes: zone 1 from 0-10, zone 2 from 10-20, the last from 50-60.
     defaultGameDuration: 60,
 
-    // Target radius levels in meters, one per zone, largest first
-    targetRadiusLevels: [1500, 1000, 750, 500, 250, 125],
+    // Zone radii in meters, one per zone, largest first. Each is roughly two
+    // thirds of the one before, closing from a first zone a runner has to walk
+    // across to a final zone they have to stand in.
+    targetRadiusLevels: [750, 500, 350, 240, 160, 110],
 
     // How long a runner is safe from being caught after a catch takes their
     // shield, in minutes. Configurable per room at setup.
@@ -66,6 +68,14 @@ module.exports = {
       // Only show a direction arrow if the runner covered this distance within headingMaxAgeMs
       headingMinDistanceMeters: 40,
       headingMaxAgeMs: 2 * 60 * 1000,
+
+      // The end of game replay covers the whole game and keeps more of the
+      // route, since nobody is being chased any more
+      review: {
+        minStepMeters: 15,
+        simplifyToleranceMeters: 8,
+        maxPointsPerSighting: 12,
+      },
     },
   },
 

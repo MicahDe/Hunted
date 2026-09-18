@@ -786,46 +786,123 @@ textarea:focus {
   box-shadow: var(--shadow-sm);
 }
 
-.player-scores {
+/* How everyone finished, on the game over screen */
+.player-outcomes {
   margin-bottom: var(--spacing-6);
 }
 
-.player-scores-list {
+.player-outcome-list {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-2);
   margin-top: var(--spacing-3);
 }
 
-.player-score-item {
+.player-outcome-item {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-3);
   padding: var(--spacing-2) var(--spacing-3);
+  background-color: var(--color-surface-variant);
+  border-left: 3px solid var(--color-border);
   border-radius: var(--border-radius-md);
 }
 
-.player-score-item.runner {
-  background-color: var(--runner-color-bg);
-  color: var(--color-runner);
-}
-
-.player-score-item.hunter {
-  background-color: var(--hunter-color-bg);
-  color: var(--color-hunter);
-}
-
-.player-score-item .player-name {
+.player-outcome-item .player-name {
   font-weight: var(--font-weight-medium);
 }
 
-.player-score-item .player-score {
-  font-weight: var(--font-weight-bold);
+.player-outcome-item .player-outcome {
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
 }
 
-.player-score-item .player-team {
+.player-outcome-item.won {
+  border-left-color: #4caf50;
+}
+
+.player-outcome-item.won .player-outcome {
+  color: #4caf50;
+}
+
+.player-outcome-item.out {
+  border-left-color: var(--color-hunter);
+}
+
+.player-outcome-item.out .player-outcome {
+  color: var(--color-hunter-light);
+}
+
+.player-outcome-item.timeout {
+  border-left-color: #ef7d54;
+}
+
+.player-outcome-item.timeout .player-outcome {
+  color: #ef7d54;
+}
+
+.player-outcome-item.hunter .player-outcome,
+.player-outcome-item.running .player-outcome {
+  color: var(--color-text-tertiary);
+}
+
+/* The replay map fills the screen under its header, with the runners listed
+   along the bottom so the colours on the map mean something */
+.replay-map {
+  flex: 1;
+  width: 100%;
+  min-height: 300px;
+}
+
+.replay-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2) var(--spacing-4);
+  padding: var(--spacing-3) var(--spacing-4);
+  background-color: var(--color-primary);
   font-size: var(--font-size-sm);
-  opacity: 0.8;
-  margin-left: var(--spacing-2);
+  font-family: var(--font-family-mono);
+}
+
+.replay-legend-item {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-secondary);
+}
+
+.replay-legend-item.won {
+  color: #4caf50;
+}
+
+.replay-legend-item.out {
+  color: var(--color-hunter-light);
+}
+
+.replay-legend-item.timeout {
+  color: #ef7d54;
+}
+
+/* Name and outcome beside where a runner's game ended */
+.review-label-container {
+  background: transparent;
+  border: none;
+  display: flex;
+  justify-content: center;
+}
+
+.review-label {
+  display: inline-block;
+  font-size: 11px;
+  color: white;
+  text-shadow:
+    0 0 2px rgba(0, 0, 0, 0.9),
+    0 0 2px rgba(0, 0, 0, 0.9);
+  background-color: rgba(0, 0, 0, 0.65);
+  border-left: 3px solid var(--runner-color, #4caf50);
+  border-radius: 3px;
+  padding: 2px 5px;
+  white-space: nowrap;
 }
 
 .stats-grid {

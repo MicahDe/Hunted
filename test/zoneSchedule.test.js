@@ -16,6 +16,7 @@ const sqlite3 = require("sqlite3");
 const socketManager = require("../server/socket/socketManager");
 const { initDatabase } = require("../server/db/schema");
 const zoneUtils = require("../shared/utils/zoneUtils");
+const geoUtils = require("../shared/utils/geoUtils");
 const config = require("../server/config/default");
 
 const MINUTE = 60 * 1000;
@@ -59,6 +60,10 @@ async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration
       join: () => {},
       fire: (event, payload) => handlers[event](payload),
       received: (event) => socket.emitted.filter((entry) => entry.event === event),
+      lastState: () => {
+        const states = socket.emitted.filter((entry) => entry.event === "game_state");
+        return states.length ? states[states.length - 1].payload : null;
+      },
     };
 
     sockets.set(id, socket);
@@ -180,6 +185,88 @@ async function waitFor(condition, description, timeoutMs = 3000) {
 
   throw new Error(`Timed out waiting for ${description}`);
 }
+
+test("every runner is racing for the same final zone, by their own route in", async () => {
+  const game = await createGame({ runners: ["Ruby", "Sam"] });
+
+  const room = await game.room();
+  const ruby = JSON.parse((await game.target("Ruby")).zones);
+  const sam = JSON.parse((await game.target("Sam")).zones);
+
+  // The final zone is the room's, and it is the same one for both of them
+  assert.deepStrictEqual(ruby[ZONE_COUNT - 1], sam[ZONE_COUNT - 1]);
+  assert.strictEqual(ruby[ZONE_COUNT - 1].lat, room.final_lat);
+  assert.strictEqual(ruby[ZONE_COUNT - 1].lng, room.final_lng);
+
+  // The way in is not
+  const gap = geoUtils.calculateDistance(ruby[0].lat, ruby[0].lng, sam[0].lat, sam[0].lng);
+  assert.ok(gap > 1, "both runners were shown the same first zone");
+});
+
+test("the host picks the area, and the game picks the zone inside it", async () => {
+  const game = await createGame();
+  const room = await game.room();
+
+  assert.ok(room.final_lat != null && room.final_lng != null, "the game should have hidden a final zone");
+
+  const fromCentre = geoUtils.calculateDistance(room.final_lat, room.final_lng, CENTRE.lat, CENTRE.lng);
+  assert.ok(fromCentre <= room.play_radius + 1, `the final zone landed ${fromCentre.toFixed(0)}m out, beyond the play area`);
+});
+
+test("hunters are told nothing about anyone's zones", async () => {
+  const game = await createGame();
+
+  game.players.Hank.socket.fire("resync_game_state", { roomId: game.roomId });
+  await settle();
+
+  const hunterState = game.players.Hank.socket.lastState();
+  assert.deepStrictEqual(hunterState.targets, [], "a hunter's state should carry no zones at all");
+  assert.strictEqual(hunterState.finalZone, null, "a hunter should not be told the final zone mid-game");
+
+  // The runner's own state carries one zone, and it is a circle, not the answer
+  game.players.Ruby.socket.fire("resync_game_state", { roomId: game.roomId });
+  await settle();
+
+  const runnerState = game.players.Ruby.socket.lastState();
+  assert.strictEqual(runnerState.targets.length, 1);
+  assert.strictEqual(runnerState.targets[0].zoneNumber, 1);
+  assert.strictEqual(runnerState.finalZone, null, "not even the runner is told where it ends");
+
+  const zones = JSON.parse((await game.target("Ruby")).zones);
+  assert.deepStrictEqual(runnerState.targets[0].location, { lat: zones[0].lat, lng: zones[0].lng });
+});
+
+test("the final zone is revealed to everyone once the game is over", async () => {
+  const game = await createGame();
+
+  await game.setElapsed(61);
+  await game.manager.processZoneSchedules();
+  await settle();
+
+  const room = await game.room();
+  const over = game.of("game_over");
+  assert.strictEqual(over.length, 1);
+  assert.deepStrictEqual(over[0].payload.gameState.finalZone, {
+    lat: room.final_lat,
+    lng: room.final_lng,
+    radius: config.game.targetRadiusLevels[ZONE_COUNT - 1],
+  });
+});
+
+test("a runner has to be inside their own zone, not just near the final one", async () => {
+  const game = await createGame();
+
+  const zones = JSON.parse((await game.target("Ruby")).zones);
+  const outside = geoUtils.calculateDestination(zones[0].lat, zones[0].lng, 90, zones[0].radius + 100);
+
+  game.players.Ruby.socket.fire("location_update", { lat: outside.lat, lng: outside.lng });
+  await settle();
+  assert.strictEqual((await game.target("Ruby")).zone_index, 0, "a ping outside the zone captures nothing");
+
+  game.players.Ruby.socket.fire("location_update", { lat: zones[0].lat, lng: zones[0].lng });
+  await settle();
+  assert.strictEqual((await game.target("Ruby")).zone_index, 1, "a ping inside it captures the zone");
+});
 
 test("every runner starts the game with a shield and the first zone open", async () => {
   const game = await createGame();

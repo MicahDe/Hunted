@@ -25,7 +25,6 @@ const GameMap = {
   runnerMarkers: {},
   runnerLabels: {},
   runnerTrails: {},
-  targetMarkers: {},
   targetCircles: {},
   boundaryCircle: null,
 
@@ -44,6 +43,9 @@ const GameMap = {
 
   // Shield and immunity per player, from the last game state
   shieldStates: {},
+
+  // The map on the end of game replay screen
+  reviewMap: null,
 
   // Runner map colours, read from variables.css
   runnerColors: [],
@@ -258,7 +260,6 @@ const GameMap = {
     this.runnerMarkers = {};
     this.runnerLabels = {};
     this.runnerTrails = {};
-    this.targetMarkers = {};
     this.targetCircles = {};
     this.boundaryCircle = null;
     this.playerDataCache = {};
@@ -799,82 +800,39 @@ const GameMap = {
     }
   },
 
-  // Update targets on map
-  updateTargets: function (targets, playerTeam, radiusLevels) {
+  // Draw the zone a runner is on. The server sends the circle itself - where it
+  // sits is the whole puzzle, so the client is never told what it is closing in
+  // on, and hunters are sent no zones at all.
+  updateTargets: function (targets, playerTeam) {
     if (!this.gameMap) return;
-    if (playerTeam === "hunter") {
-      console.log("Skipping targets for hunter");
-      return;
-    }
 
-    console.log("Updating targets for player team:", playerTeam);
-    console.log("Available targets:", targets);
-
-    // Clear all existing target markers and circles first
-    Object.keys(this.targetMarkers).forEach((targetId) => {
-      if (this.targetMarkers[targetId]) {
-        this.gameMap.removeLayer(this.targetMarkers[targetId]);
-        delete this.targetMarkers[targetId];
-      }
-    });
-
+    // Clear any zone already drawn
     Object.keys(this.targetCircles).forEach((targetId) => {
-      if (this.targetCircles[targetId]) {
-        this.gameMap.removeLayer(this.targetCircles[targetId]);
-        delete this.targetCircles[targetId];
-      }
+      this.gameMap.removeLayer(this.targetCircles[targetId]);
+      delete this.targetCircles[targetId];
     });
 
-    // Only process targets for current player and with active status
-    const myActiveTargets = targets.filter((target) => target.playerId === gameState.playerId && target.status !== "reached");
+    if (playerTeam !== "runner") return;
 
-    console.log(`Found ${myActiveTargets.length} active targets for current player`);
+    const zone = (targets || []).find((target) => target.playerId === gameState.playerId && target.status === "active" && target.location);
 
-    // For runners, we should only have at most one active target
-    if (myActiveTargets.length > 0) {
-      // If somehow there are multiple targets, just use the first one
-      const target = myActiveTargets[0];
-      console.log("Processing target:", target);
+    if (!zone) return;
 
-      // Only create circles for runner
-      if (playerTeam === "runner") {
-        // Create a feature group to hold all circles
-        this.targetCircles[target.targetId] = L.featureGroup().addTo(this.gameMap);
+    // A zone can only be captured inside its own window, so its colour says
+    // whether it is worth running for right now
+    const zoneStatus = zone.zoneStatus || "open";
+    const isOpen = zoneStatus === "open";
+    const circleColor = isOpen ? "#4caf50" : zoneStatus === "locked" ? "#ffeb3b" : "#ef7d54";
 
-        // The ladder of zone sizes, so each circle sits inside the one before it
-        const levels = radiusLevels && radiusLevels.length ? radiusLevels : zoneUtils.DEFAULT_RADIUS_LEVELS;
-
-        // Generate positions for nested circles
-        const circlePositions = geoUtils.generateNestedCirclePositions(target.location.lat, target.location.lng, levels);
-
-        // A zone can only be captured inside its own window, so its colour says
-        // whether it is worth running for right now
-        const zoneStatus = target.zoneStatus || "open";
-        const isOpen = zoneStatus === "open";
-        const circleColor = isOpen ? "#4caf50" : zoneStatus === "locked" ? "#ffeb3b" : "#ef7d54";
-
-        // Create each circle at its calculated position
-        circlePositions.forEach((position) => {
-          if (position.radius !== target.radiusLevel) {
-            return;
-          }
-
-          // Create circle with the specified radius at the calculated position
-          const circle = L.circle([position.lat, position.lng], {
-            radius: position.radius,
-            color: circleColor,
-            fillColor: circleColor,
-            fillOpacity: 0.12, // A heavier fill muddies the dark map and hides trails
-            weight: 2,
-            dashArray: isOpen ? null : "5, 5",
-            className: `map-circle-target map-circle-zone-${zoneStatus}`,
-          });
-
-          // Add the circle to the feature group
-          this.targetCircles[target.targetId].addLayer(circle);
-        });
-      }
-    }
+    this.targetCircles[zone.targetId] = L.circle([zone.location.lat, zone.location.lng], {
+      radius: zone.radiusLevel,
+      color: circleColor,
+      fillColor: circleColor,
+      fillOpacity: 0.12, // A heavier fill muddies the dark map and hides trails
+      weight: 2,
+      dashArray: isOpen ? null : "5, 5",
+      className: `map-circle-target map-circle-zone-${zoneStatus}`,
+    }).addTo(this.gameMap);
   },
 
   // Shields are public, so the map can show who still has one and who is
@@ -914,6 +872,181 @@ const GameMap = {
     }
 
     return { badge: "", detail: "No shield - one more and they are out" };
+  },
+
+  // The whole game on one map, once it is over: where every runner was seen,
+  // how each of them finished, and the final zone everyone was racing for.
+  // Drawn in the same language as the live map - solid where a runner was
+  // seen, dotted where their app was shut - but frozen, with nothing fading.
+  renderReview: function (review) {
+    const container = document.getElementById("replay-map");
+    if (!container) return;
+
+    if (this.reviewMap) {
+      this.reviewMap.remove();
+      this.reviewMap = null;
+    }
+
+    this.reviewMap = L.map("replay-map", {
+      zoomControl: false,
+      attributionControl: false,
+    });
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(this.reviewMap);
+
+    L.control.zoom({ position: "topright" }).addTo(this.reviewMap);
+    L.control.attribution({ position: "bottomright" }).addTo(this.reviewMap);
+    L.control.scale({ metric: true, imperial: false, position: "bottomleft" }).addTo(this.reviewMap);
+
+    const points = [];
+
+    // The area the hunters picked, and never saw inside
+    if (review.playArea) {
+      L.circle([review.playArea.lat, review.playArea.lng], {
+        radius: review.playArea.radius,
+        color: "#999999",
+        fillColor: "#ffffff",
+        fillOpacity: 0.04,
+        weight: 2,
+        dashArray: "5, 10",
+        interactive: false,
+      }).addTo(this.reviewMap);
+    }
+
+    // No more secrets
+    if (review.finalZone) {
+      L.circle([review.finalZone.lat, review.finalZone.lng], {
+        radius: review.finalZone.radius,
+        color: "#4caf50",
+        fillColor: "#4caf50",
+        fillOpacity: 0.2,
+        weight: 2,
+      }).addTo(this.reviewMap);
+
+      L.marker([review.finalZone.lat, review.finalZone.lng], {
+        icon: L.divIcon({
+          className: "review-label-container",
+          html: this.reviewLabel("Final zone", null),
+          iconSize: [120, 18],
+          iconAnchor: [60, -8],
+        }),
+        interactive: false,
+      }).addTo(this.reviewMap);
+
+      points.push([review.finalZone.lat, review.finalZone.lng]);
+    }
+
+    const outcomes = {};
+    (review.players || []).forEach((player) => {
+      outcomes[player.playerId] = player.outcome;
+    });
+
+    Object.values(review.trails || {}).forEach((runner, index) => {
+      this.renderReviewTrail(runner, outcomes[runner.playerId], review.gameStartTime, index).forEach((point) => points.push(point));
+    });
+
+    if (points.length > 0) {
+      this.reviewMap.fitBounds(L.latLngBounds(points).pad(0.2));
+    } else if (review.playArea) {
+      this.reviewMap.setView([review.playArea.lat, review.playArea.lng], 14);
+    }
+
+    // Leaflet needs telling once the screen it sits on is actually visible
+    setTimeout(() => this.reviewMap && this.reviewMap.invalidateSize(), 100);
+  },
+
+  // One runner's whole game, in their colour. The label index stacks the end
+  // labels, since runners tend to finish in much the same place.
+  renderReviewTrail: function (runner, outcome, gameStartTime, labelIndex = 0) {
+    const color = this.runnerColor(runner.colorIndex);
+    const sightings = (runner.trail && runner.trail.sightings) || [];
+    const points = [];
+
+    sightings.forEach((sighting, index) => {
+      sighting.points.forEach((point) => points.push(point));
+
+      // Where they went with the app shut is still anyone's guess
+      if (index > 0) {
+        const previous = sightings[index - 1].points;
+        L.polyline([previous[previous.length - 1], sighting.points[0]], {
+          className: "trail-gap",
+          color,
+          weight: 3,
+          dashArray: "1, 8",
+          interactive: false,
+        }).addTo(this.reviewMap);
+      }
+
+      if (sighting.points.length > 1) {
+        L.polyline(sighting.points, {
+          className: "trail-line-casing",
+          weight: 7,
+          interactive: false,
+        }).addTo(this.reviewMap);
+
+        L.polyline(sighting.points, {
+          className: "trail-line",
+          color,
+          weight: 4,
+          interactive: false,
+        }).addTo(this.reviewMap);
+      }
+
+      // Tap a dot to see how far into the game they were standing there
+      L.circleMarker(sighting.points[sighting.points.length - 1], {
+        className: "trail-sighting-dot",
+        fillColor: color,
+        radius: 4,
+        weight: 2,
+      })
+        .bindTooltip(`${runner.username}: ${this.minutesInto(sighting.end, gameStartTime)}`, { direction: "top" })
+        .addTo(this.reviewMap);
+    });
+
+    // Where their game ended
+    const last = points[points.length - 1];
+
+    if (last) {
+      L.marker(last, {
+        icon: L.divIcon({
+          className: "review-label-container",
+          html: this.reviewLabel(runner.username, outcome, color),
+          iconSize: [140, 18],
+          iconAnchor: [70, -8 - labelIndex * 20],
+        }),
+        interactive: false,
+        zIndexOffset: 900,
+      }).addTo(this.reviewMap);
+    }
+
+    return points;
+  },
+
+  // Player names are never parsed as HTML, on the replay map either
+  reviewLabel: function (name, outcome, color) {
+    const label = document.createElement("div");
+    label.className = "review-label";
+
+    if (color) {
+      label.style.setProperty("--runner-color", color);
+    }
+
+    const outcomeText = outcome && typeof UI !== "undefined" && UI.outcomeLabel ? UI.outcomeLabel(outcome).text : null;
+    label.textContent = outcomeText ? `${name} - ${outcomeText}` : name;
+
+    return label;
+  },
+
+  // How far into the game something happened, for the replay
+  minutesInto: function (timestamp, gameStartTime) {
+    if (!gameStartTime) {
+      return this.formatTimeElapsed(this.secondsSince(timestamp)) + " ago";
+    }
+
+    const minutes = Math.max(0, Math.round((timestamp - gameStartTime) / 60000));
+    return `${minutes} min in`;
   },
 
   // Remove a player's marker, label and trail

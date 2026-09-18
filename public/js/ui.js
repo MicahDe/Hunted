@@ -109,7 +109,7 @@ const UI = {
     const hint = document.getElementById("play-radius-hint");
     if (!hint) return;
 
-    hint.textContent = `Keep this at or above the first zone's size (${zoneUtils.DEFAULT_RADIUS_LEVELS[0]}m), or Runners start inside zone 1 already`;
+    hint.textContent = `The first zone is ${zoneUtils.DEFAULT_RADIUS_LEVELS[0]}m across the final one, so a play area smaller than that makes the first window a gift`;
   },
 
   // Initialize the join room screen
@@ -219,6 +219,25 @@ const UI = {
     // Refresh player list indicators if available
     if (typeof PlayerListIndicator !== "undefined" && PlayerListIndicator.refreshIndicators) {
       PlayerListIndicator.refreshIndicators();
+    }
+  },
+
+  // How a player's game ended, in words, shared by the scoreboard and the
+  // replay map so they never disagree
+  outcomeLabel: function (outcome) {
+    switch (outcome) {
+      case "won":
+        return { text: "Made it home", state: "won" };
+      case "caught":
+        return { text: "Caught", state: "out" };
+      case "missed_zone":
+        return { text: "Missed a zone", state: "out" };
+      case "out_of_time":
+        return { text: "Ran out of time", state: "timeout" };
+      case "hunter":
+        return { text: "Hunter", state: "hunter" };
+      default:
+        return { text: "Still running", state: "running" };
     }
   },
 

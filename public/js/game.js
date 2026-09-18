@@ -66,7 +66,7 @@ const Game = {
 
     // Update targets on map
     console.log("Updating targets on map for team:", gameState.team);
-    GameMap.updateTargets(initialState.targets, gameState.team, initialState.zoneRadiusLevels);
+    GameMap.updateTargets(initialState.targets, gameState.team);
     GameMap.setShieldStates(initialState.players);
 
     // Keep the game clock, zone window and shield counting down
@@ -200,7 +200,7 @@ const Game = {
 
     // Update targets on map (always call this to ensure targets are properly updated)
     if (this.playerInfo) {
-      GameMap.updateTargets(state.targets, this.playerInfo.team, state.zoneRadiusLevels);
+      GameMap.updateTargets(state.targets, this.playerInfo.team);
     }
 
     // Shields are public, so the map labels can show who still has one
@@ -393,16 +393,8 @@ const Game = {
       // A hunter has no zone or shield of their own left to show
       this.refreshStatus();
 
-      // Clear target displays
-      Object.keys(GameMap.targetMarkers).forEach((targetId) => {
-        GameMap.gameMap.removeLayer(GameMap.targetMarkers[targetId]);
-        delete GameMap.targetMarkers[targetId];
-      });
-
-      Object.keys(GameMap.targetCircles).forEach((targetId) => {
-        GameMap.gameMap.removeLayer(GameMap.targetCircles[targetId]);
-        delete GameMap.targetCircles[targetId];
-      });
+      // Hunters are shown no zones, including the one they were just chasing
+      GameMap.updateTargets([], "hunter");
     }
   },
 

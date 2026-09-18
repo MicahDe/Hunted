@@ -16,7 +16,7 @@
 
 // The client's copy of the zone ladder, for screens shown before any game state
 // has arrived. Kept in step with config.game.targetRadiusLevels by a test.
-const DEFAULT_RADIUS_LEVELS = [1500, 1000, 750, 500, 250, 125];
+const DEFAULT_RADIUS_LEVELS = [750, 500, 350, 240, 160, 110];
 
 // Zone windows are sized from the game duration, so every game ends on the
 // close of the final zone's window.

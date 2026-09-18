@@ -188,90 +188,45 @@ function calculateDestination(lat, lng, bearing, distance) {
 }
 
 /**
- * Calculate position for an internally tangent circle
- * @param {number} outerRadius - Radius of outer circle in meters
- * @param {number} innerRadius - Radius of inner circle in meters
- * @param {number} innerLat - Latitude of inner circle center in degrees
- * @param {number} innerLng - Longitude of inner circle center in degrees
- * @returns {Object} Object with lat and lng properties of outer circle center
+ * Build a runner's chain of zones closing in on the final zone
+ *
+ * Every runner in a game shares one final zone, so the chain is what keeps the
+ * hunt individual: each zone is placed at a random offset from the one inside
+ * it, far enough over to look different from another runner's, but never so far
+ * that the inner zone escapes it. What a runner learns therefore only ever
+ * narrows, and two runners racing for the same final zone are told different
+ * things on the way there.
+ *
+ * @param {number} finalLat - Latitude of the shared final zone
+ * @param {number} finalLng - Longitude of the shared final zone
+ * @param {Array<number>} radiusLevels - Zone radii in meters, largest first
+ * @returns {Array<{lat: number, lng: number, radius: number}>} One zone per
+ *   radius level, in the same order, each containing the next
  */
-function calculateInternallyTangentCirclePosition(outerRadius, innerRadius, innerLat, innerLng) {
-  // Calculate the distance between centers (difference of radii for internally tangent circles)
-  const distanceBetweenCenters = outerRadius - innerRadius;
+function generateZoneChain(finalLat, finalLng, radiusLevels) {
+  // The last zone is the final zone itself
+  let inner = {
+    lat: finalLat,
+    lng: finalLng,
+    radius: radiusLevels[radiusLevels.length - 1],
+  };
 
-  // Create a hash by combining the values of lat, lng and innerRadius
-  const hashValue = innerLat * 1000000 + innerLng * 10000 + innerRadius;
-  // Use a simple transformative function to generate an angle between 0 and 2π
-  const deterministicAngle = ((hashValue * 9973) % 628) / 100; // 9973 is a prime number, mod 628 then divide by 100 to get 0-6.28
+  const zones = [inner];
 
-  // Calculate the new position
-  const outerLat = innerLat + (distanceBetweenCenters * Math.sin(deterministicAngle)) / 111320; // Approx meters per degree latitude
-  const outerLng = innerLng + (distanceBetweenCenters * Math.cos(deterministicAngle)) / (111320 * Math.cos((innerLat * Math.PI) / 180)); // Adjust for longitude
+  for (let i = radiusLevels.length - 2; i >= 0; i--) {
+    const radius = radiusLevels[i];
 
-  return { lat: outerLat, lng: outerLng };
-}
+    // Offsetting by at most the difference in radii keeps the inner zone inside
+    const slack = Math.max(0, radius - inner.radius);
+    const distance = Math.sqrt(Math.random()) * slack;
+    const bearing = Math.random() * 360;
+    const centre = calculateDestination(inner.lat, inner.lng, bearing, distance);
 
-/**
- * Generate positions for nested internally tangent circles
- * @param {number} targetLat - Latitude of target (innermost circle) in degrees
- * @param {number} targetLng - Longitude of target (innermost circle) in degrees
- * @param {Array} radiusLevels - Array of radius levels in meters, from smallest to largest
- * @returns {Array} Array of objects with lat, lng, and radius properties
- */
-function generateNestedCirclePositions(targetLat, targetLng, radiusLevels) {
-  // Sort radius levels in ascending order (smallest to largest)
-  const sortedRadii = [...radiusLevels].sort((a, b) => a - b);
-
-  // Initialize with the smallest circle at the target location
-  const positions = [
-    {
-      lat: targetLat,
-      lng: targetLng,
-      radius: sortedRadii[0],
-    },
-  ];
-
-  // Generate positions for larger circles
-  for (let i = 1; i < sortedRadii.length; i++) {
-    const innerCircle = positions[i - 1];
-    const newPosition = calculateInternallyTangentCirclePosition(sortedRadii[i], innerCircle.radius, innerCircle.lat, innerCircle.lng);
-
-    positions.push({
-      lat: newPosition.lat,
-      lng: newPosition.lng,
-      radius: sortedRadii[i],
-    });
+    inner = { lat: centre.lat, lng: centre.lng, radius };
+    zones.unshift(inner);
   }
 
-  return positions;
-}
-
-/**
- * Check if a player is within any of the nested target circles
- * @param {number} playerLat - Player latitude in degrees
- * @param {number} playerLng - Player longitude in degrees
- * @param {number} targetLat - Target latitude in degrees
- * @param {number} targetLng - Target longitude in degrees
- * @param {number} targetRadius - Current target radius level in meters
- * @param {Array} radiusLevels - Array of all possible radius levels in meters
- * @returns {boolean} True if player is within any of the nested circles
- */
-function isPlayerInNestedTargetArea(playerLat, playerLng, targetLat, targetLng, targetRadius, radiusLevels) {
-  // Filter radius levels to only include those less than or equal to the current target radius
-  const activeRadiusLevels = radiusLevels.filter((r) => r <= targetRadius);
-
-  // Generate positions for all nested circles
-  const circlePositions = generateNestedCirclePositions(targetLat, targetLng, activeRadiusLevels);
-
-  // Check if player is within any of the circles
-  for (const position of circlePositions) {
-    const distanceToCircle = calculateDistance(playerLat, playerLng, position.lat, position.lng);
-    if (distanceToCircle <= position.radius) {
-      return true;
-    }
-  }
-
-  return false;
+  return zones;
 }
 
 if (typeof module !== "undefined" && module.exports) {
@@ -284,9 +239,7 @@ if (typeof module !== "undefined" && module.exports) {
     isPointInCircle,
     calculateBearing,
     calculateDestination,
-    calculateInternallyTangentCirclePosition,
-    generateNestedCirclePositions,
-    isPlayerInNestedTargetArea,
+    generateZoneChain,
   };
 } else if (typeof window !== "undefined") {
   // Browser environment
@@ -298,8 +251,6 @@ if (typeof module !== "undefined" && module.exports) {
     isPointInCircle,
     calculateBearing,
     calculateDestination,
-    calculateInternallyTangentCirclePosition,
-    generateNestedCirclePositions,
-    isPlayerInNestedTargetArea,
+    generateZoneChain,
   };
 }

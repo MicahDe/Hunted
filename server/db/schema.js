@@ -15,6 +15,8 @@ function initDatabase(db) {
             game_duration INTEGER,
             catch_immunity INTEGER,
             game_start_time INTEGER,
+            final_lat REAL,
+            final_lng REAL,
             central_lat REAL,
             central_lng REAL,
             play_radius INTEGER DEFAULT 5000,
@@ -51,6 +53,7 @@ function initDatabase(db) {
             lng REAL NOT NULL,
             radius_level INTEGER NOT NULL,
             zone_index INTEGER DEFAULT 0,
+            zones TEXT,
             points_value INTEGER,
             status TEXT DEFAULT 'active',
             zone_status TEXT DEFAULT 'inactive',
@@ -95,6 +98,8 @@ function initDatabase(db) {
       game_duration: "INTEGER",
       catch_immunity: "INTEGER",
       game_start_time: "INTEGER",
+      final_lat: "REAL",
+      final_lng: "REAL",
     });
 
     addMissingColumns(db, "players", {
@@ -107,6 +112,7 @@ function initDatabase(db) {
 
     addMissingColumns(db, "targets", {
       zone_index: "INTEGER DEFAULT 0",
+      zones: "TEXT",
       window_close_time: "INTEGER",
     });
   });

@@ -35,8 +35,8 @@ function setupAllEventListeners() {
     window.location.href = "help.html";
   });
 
-  // Back buttons
-  document.querySelectorAll(".back-btn").forEach((btn) => {
+  // Back buttons. The replay screen goes back to the game over screen, not home.
+  document.querySelectorAll(".back-btn:not(.replay-back)").forEach((btn) => {
     btn.addEventListener("click", () => {
       UI.showScreen("splash-screen");
     });
@@ -122,8 +122,14 @@ function setupAllEventListeners() {
   document.getElementById("leave-game-btn").addEventListener("click", leaveGame);
 
   // Game over screen
+  document.getElementById("replay-map-btn").addEventListener("click", openGameReplay);
   document.getElementById("new-game-btn").addEventListener("click", setupNewGame);
   document.getElementById("return-home-btn").addEventListener("click", returnToHome);
+
+  document.getElementById("replay-back-btn").addEventListener("click", () => {
+    UI.showScreen("game-over-screen");
+    currentScreen = "game-over-screen";
+  });
 
   // Handle geolocation permissions
   if ("geolocation" in navigator) {
@@ -192,6 +198,7 @@ function setupSocketConnection() {
   socket.on("shield_lost", handleShieldLost);
   socket.on("catch_rejected", handleCatchRejected);
   socket.on("runner_won", handleRunnerWon);
+  socket.on("game_review", handleGameReview);
 
   // Voice chat events
   socket.on("voice_transmission_started", handleVoiceTransmissionStarted);
@@ -620,65 +627,120 @@ function handleGameOver(data) {
   updateGameOverUI(data);
 }
 
+// The order players are listed in after the game: home first, then those still
+// out there when the clock stopped, then everyone who went out, then hunters
+const OUTCOME_ORDER = ["won", "out_of_time", "running", "caught", "missed_zone", "hunter"];
+
 function updateGameOverUI(data) {
   const state = data.gameState;
+  if (!state) return;
 
-  // Set game stats
-  document.getElementById("final-duration").textContent = `${state.gameDuration} min`;
+  const players = state.players || [];
+  const home = players.filter((player) => player.outcome === "won");
+  const out = players.filter((player) => player.outcome === "caught" || player.outcome === "missed_zone");
 
-  // Count reached targets
-  const targetsReached = state.targets.filter((t) => t.status === "reached").length;
-  document.getElementById("targets-reached").textContent = targetsReached;
-
-  // Runners who went out joined the hunters, so count them by status
-  const runnersCaught = state.players.filter((p) => p.status === "caught").length;
-  document.getElementById("runners-caught").textContent = runnersCaught;
-
-  // Populate all player scores
-  const allPlayerScoresList = document.getElementById("all-player-scores-list");
-  if (allPlayerScoresList) {
-    allPlayerScoresList.innerHTML = "";
-
-    // Sort all players by score (highest first)
-    const allPlayers = [...state.players].sort((a, b) => (b.score || 0) - (a.score || 0));
-
-    if (allPlayers.length === 0) {
-      // No players in the game (shouldn't happen)
-      const noPlayers = document.createElement("div");
-      noPlayers.textContent = "No players in this game";
-      allPlayerScoresList.appendChild(noPlayers);
-    } else {
-      // Add each player's score
-      allPlayers.forEach((player) => {
-        const scoreItem = document.createElement("div");
-        scoreItem.className = `player-score-item ${player.team}`;
-
-        // Left side: player name and team
-        const playerInfo = document.createElement("div");
-        playerInfo.className = "player-info";
-
-        const playerName = document.createElement("span");
-        playerName.className = "player-name";
-        playerName.textContent = player.username;
-
-        const playerTeam = document.createElement("span");
-        playerTeam.className = "player-team";
-        playerTeam.textContent = `(${player.team})`;
-
-        playerInfo.appendChild(playerName);
-        playerInfo.appendChild(playerTeam);
-
-        // Right side: player score
-        const playerScore = document.createElement("span");
-        playerScore.className = "player-score";
-        playerScore.textContent = player.score || 0;
-
-        scoreItem.appendChild(playerInfo);
-        scoreItem.appendChild(playerScore);
-        allPlayerScoresList.appendChild(scoreItem);
-      });
-    }
+  // Who won, said plainly
+  const headline = document.getElementById("game-over-headline");
+  if (headline) {
+    headline.textContent = home.length > 0 ? `${home.length === 1 ? `${home[0].username} made it home` : `${home.length} Runners made it home`}` : "The Hunters took the lot";
   }
+
+  document.getElementById("final-duration").textContent = `${state.gameDuration} min`;
+  document.getElementById("runners-home").textContent = home.length;
+  document.getElementById("runners-out").textContent = out.length;
+
+  // How everyone finished
+  const list = document.getElementById("player-outcome-list");
+  if (!list) return;
+
+  list.innerHTML = "";
+
+  if (players.length === 0) {
+    const empty = document.createElement("div");
+    empty.textContent = "No players in this game";
+    list.appendChild(empty);
+    return;
+  }
+
+  [...players]
+    .sort((a, b) => OUTCOME_ORDER.indexOf(a.outcome) - OUTCOME_ORDER.indexOf(b.outcome) || a.username.localeCompare(b.username))
+    .forEach((player) => {
+      const outcome = UI.outcomeLabel(player.outcome);
+
+      const row = document.createElement("div");
+      row.className = `player-outcome-item ${outcome.state}`;
+
+      const name = document.createElement("span");
+      name.className = "player-name";
+
+      // Runners keep the colour their trail had, so the replay map reads across
+      if (player.colorIndex != null) {
+        const swatch = document.createElement("span");
+        swatch.className = "player-color";
+        swatch.style.setProperty("--runner-color", GameMap.runnerColor(player.colorIndex));
+        name.appendChild(swatch);
+      }
+
+      name.appendChild(document.createTextNode(player.username));
+
+      const result = document.createElement("span");
+      result.className = "player-outcome";
+      result.textContent = outcome.text;
+
+      // A runner who came home with their shield intact deserves the credit
+      if (player.outcome === "won" && player.shieldActive) {
+        result.textContent = `${outcome.text}, shield intact`;
+      }
+
+      row.append(name, result);
+      list.appendChild(row);
+    });
+}
+
+// Look back over the game: everyone's trails, and the final zone revealed
+function openGameReplay() {
+  if (!gameState.roomId) {
+    return UI.showNotification("There is no game to look back on", "warning");
+  }
+
+  UI.showLoading("Loading the game...");
+  socket.emit("request_game_review", { roomId: gameState.roomId });
+}
+
+function handleGameReview(review) {
+  console.log("Game review:", review);
+  UI.hideLoading();
+  UI.showScreen("replay-screen");
+  currentScreen = "replay-screen";
+
+  GameMap.renderReview(review);
+  updateReplayLegend(review);
+}
+
+function updateReplayLegend(review) {
+  const legend = document.getElementById("replay-legend");
+  if (!legend) return;
+
+  legend.innerHTML = "";
+
+  // Only the runners left a trail worth a legend entry
+  (review.players || [])
+    .filter((player) => player.colorIndex != null)
+    .sort((a, b) => a.colorIndex - b.colorIndex)
+    .forEach((player) => {
+      const outcome = UI.outcomeLabel(player.outcome);
+
+      const row = document.createElement("span");
+      row.className = `replay-legend-item ${outcome.state}`;
+
+      const swatch = document.createElement("span");
+      swatch.className = "player-color";
+      swatch.style.setProperty("--runner-color", GameMap.runnerColor(player.colorIndex));
+
+      row.appendChild(swatch);
+      row.appendChild(document.createTextNode(`${player.username} - ${outcome.text}`));
+      legend.appendChild(row);
+    });
 }
 
 function startGame() {

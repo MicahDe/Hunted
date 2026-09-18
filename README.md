@@ -6,7 +6,9 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 
 - **Real-time location tracking** - Hunters can track Runners' locations in real-time
 - **Zone windows** - each zone is capturable only during its own slot of the game clock
+- **One hidden final zone** - every Runner races for the same spot, by their own set of zones, and no Hunter is told where it is
 - **Shields** - one shared life per Runner, spent by a missed zone or a catch
+- **Game replay** - look back over everyone's movements, and where the final zone was hiding
 - **Target discovery** - Runners navigate to targets with progressively narrowing circles
 - **Team-based gameplay** - Join as either a Hunter or Runner
 - **Room-based system** - Create or join game rooms with friends
@@ -24,12 +26,14 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 ### How the Game Works
 
 **Play Area Setup:**
-- Hunters select a central location for the play area (typically the starting location)
-- Each Runner gets a unique final target zone, randomly placed within a radius of the central location
-- This makes the game about staying hidden nearby rather than traveling long distances
+- Hunters pick a loose play area: a central location (typically the starting location) and a radius
+- When the game starts, one final zone is hidden at random somewhere inside that area. It is the same final zone for every Runner, and nobody is told where it is - not the Hunters, and not the Runners
+- Each Runner is led to it by their own chain of zones, so no two Runners are shown the same circles
+- This makes the game about staying hidden nearby rather than traveling long distances, and about everyone converging on one place at the end
 
 **Zone Windows:**
 - The game duration is split evenly into one window per zone, so a 60 minute game over six zones opens a zone every 10 minutes: zone 1 from minute 0-10, zone 2 from 10-20, and the final zone from 50-60
+- Zones close in from 750m down to 110m, each roughly two thirds of the one before, and every one of them contains the final zone
 - A zone can only be captured while its window is running, and only with the app open from inside the zone
 - Capturing a zone early reveals the next one straight away so Runners can start moving, but it stays **locked** until its own window opens
 - A window that closes with the zone uncaptured costs the Runner a shield, and they move on to the next zone with everyone else
@@ -43,7 +47,7 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 - Shields are public: the menu player list and the map show who still has one and who is currently immune
 
 **For Runners:**
-- Navigate through a series of nested zones that progressively reveal your final target
+- Navigate through a series of nested zones that progressively reveal the final zone everyone is racing for
 - The header shows the zone you are on, the countdown to its window opening or closing, your shield, and how long is left in the game
 - Your location pings to Hunters every 30 seconds while the app is open
 - You can see where other Runners and Hunters have pinged on the map
@@ -60,9 +64,10 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 
 ### Winning
 
-- **Runners win individually:** Each Runner who captures their final zone within its window is marked as having "won" - multiple Runners can win!
+- **Runners win individually:** Each Runner who captures the final zone within its window is marked as having "won" - multiple Runners can win!
 - **Hunters win as a team:** If all Runners are out before any reach their final target, Hunters win together
-- **The clock:** When the final zone's window closes the game is over, and any Runner still short of their target has run out of road
+- **The clock:** When the final zone's window closes the game is over, and any Runner still short of it has run out of road
+- **Afterwards:** The game over screen says how everyone finished, and "Replay the Map" opens the whole game - every Runner's movements, and the final zone revealed at last
 
 ## Installation and Setup
 
