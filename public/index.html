@@ -56,7 +56,7 @@
           <button id="join-room-btn" class="secondary-btn">Join Room</button>
           <button id="help-btn" class="secondary-btn">How to Play</button>
         </div>
-        <div class="app-version">v1.0.7</div>
+        <div class="app-version">v1.1.0</div>
       </div>
 
       <!-- Create Room Screen -->
@@ -99,15 +99,33 @@
               </div>
             </div>
             <div class="form-group">
-              <label for="zone-activation-delay">Zone Activation Delay (seconds)</label>
+              <label for="game-duration">Game Duration (minutes)</label>
               <input
                 type="number"
-                id="zone-activation-delay"
-                min="1"
-                max="600"
-                value="180"
+                id="game-duration"
+                min="6"
+                max="240"
+                step="6"
+                value="60"
                 required
               />
+              <div class="location-info">
+                <span id="zone-window-hint">Split evenly into one window per zone</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="catch-immunity">Shield Immunity (minutes)</label>
+              <input
+                type="number"
+                id="catch-immunity"
+                min="0"
+                max="30"
+                value="3"
+                required
+              />
+              <div class="location-info">
+                <span>How long a Runner cannot be caught again after a catch takes their shield</span>
+              </div>
             </div>
             <div class="form-group">
               <label>Runner Target Location</label>
@@ -130,6 +148,7 @@
               />
               <div class="location-info">
                 <span>The radius within the Runner Target Location that Runner targets will be generated</span>
+                <span id="play-radius-hint">Keep this at or above the first zone's size, or Runners start inside zone 1 already</span>
               </div>
             </div>
             <button type="submit" class="primary-btn">Create Room</button>
@@ -215,14 +234,30 @@
             <h3>Game Settings</h3>
             <div class="game-settings">
               <div class="setting-item">
-                <span class="setting-label">Zone Activation Delay:</span>
-                <span id="zone-activation-delay-display">60 sec</span>
+                <span class="setting-label">Game Duration:</span>
+                <span id="game-duration-display">60 min</span>
+              </div>
+              <div class="setting-item">
+                <span class="setting-label">Zone Windows:</span>
+                <span id="zone-window-display">6 zones, 10 min each</span>
+              </div>
+              <div class="setting-item">
+                <span class="setting-label">Shield Immunity:</span>
+                <span id="catch-immunity-display">3 min</span>
               </div>
               <div class="setting-item">
                 <span class="setting-label">Play Area:</span>
                 <span id="play-radius-display">5km radius</span>
               </div>
             </div>
+          </div>
+          <div class="lobby-section">
+            <h3>Shields</h3>
+            <p class="lobby-note">
+              Every Runner starts with one shield - a dog's life. Miss a zone's window or get caught
+              and it takes the hit; the second time either happens, you are out and join the Hunters.
+              A shield spent on a catch also makes you immune to being caught again for a few minutes.
+            </p>
           </div>
           <div class="lobby-section">
             <h3>Game Location</h3>
@@ -249,6 +284,11 @@
       <div id="game-screen" class="screen">
         <div class="game-header">
           <div class="game-status">
+            <div class="status-clock status-item" id="game-clock-container" style="display: none;">
+              <div id="game-clock" class="time-indicator">
+                <span id="game-clock-value">--:--</span>
+              </div>
+            </div>
             <div class="status-zones status-item" id="zones-remaining-container" style="display: none;">
               <div id="zones-remaining" class="zones-indicator">
                 <span id="zones-remaining-value">-</span>
@@ -257,6 +297,11 @@
             <div class="status-time status-item" id="zone-status-container" style="display: none;">
               <div id="zone-status" class="time-indicator">
                 <span id="zone-status-value">No Zone</span>
+              </div>
+            </div>
+            <div class="status-shield status-item" id="shield-status-container" style="display: none;">
+              <div id="shield-status" class="time-indicator">
+                <span id="shield-status-value">Shield</span>
               </div>
             </div>
           </div>
@@ -418,6 +463,7 @@
 
     <!-- Internal Scripts -->
     <script src="../shared/utils/geoUtils.js"></script>
+    <script src="../shared/utils/zoneUtils.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/map.js"></script>
     <script src="js/audioDsp.js"></script>

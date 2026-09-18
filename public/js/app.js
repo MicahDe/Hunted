@@ -112,6 +112,11 @@ function setupAllEventListeners() {
     GameMap.centerOnPlayer();
   });
 
+  // Spell out the zone windows as the host picks a game length
+  document.getElementById("game-duration").addEventListener("input", () => {
+    UI.updateZoneWindowHint();
+  });
+
   document.getElementById("caught-btn").addEventListener("click", reportSelfCaught);
 
   document.getElementById("leave-game-btn").addEventListener("click", leaveGame);
@@ -182,8 +187,10 @@ function setupSocketConnection() {
   socket.on("delete_success", handleDeleteSuccess);
   socket.on("game_started", handleGameStarted);
   socket.on("new_target", handleNewTarget);
-  socket.on("target_radius_update", handleTargetRadiusUpdate);
-  socket.on("zone_activated", handleZoneActivated);
+  socket.on("zone_captured", handleZoneCaptured);
+  socket.on("zone_missed", handleZoneMissed);
+  socket.on("shield_lost", handleShieldLost);
+  socket.on("catch_rejected", handleCatchRejected);
   socket.on("runner_won", handleRunnerWon);
 
   // Voice chat events
@@ -233,7 +240,8 @@ function checkForExistingSession() {
 function createRoom() {
   const roomName = document.getElementById("room-name").value.trim();
   const username = document.getElementById("creator-username").value.trim();
-  const zoneActivationDelay = parseInt(document.getElementById("zone-activation-delay").value);
+  const gameDuration = parseInt(document.getElementById("game-duration").value);
+  const catchImmunity = parseInt(document.getElementById("catch-immunity").value);
   const playRadius = parseInt(document.getElementById("play-radius").value);
   const teamBtn = document.querySelector("#create-room-form .team-btn.selected");
 
@@ -271,7 +279,8 @@ function createRoom() {
     roomName,
     username,
     team,
-    zoneActivationDelay,
+    gameDuration,
+    catchImmunity,
     playRadius,
     centralLat: location.lat,
     centralLng: location.lng,
@@ -375,9 +384,20 @@ function updateLobbyUI(state) {
   }
 
   // Update game settings
-  const zoneDelayElement = document.getElementById("zone-activation-delay-display");
-  if (zoneDelayElement) {
-    zoneDelayElement.textContent = `${state.zoneActivationDelay} sec`;
+  const durationElement = document.getElementById("game-duration-display");
+  if (durationElement && state.gameDuration) {
+    durationElement.textContent = `${state.gameDuration} min`;
+  }
+
+  // One zone window per zone, so the last zone is capturable in the final stretch
+  const windowElement = document.getElementById("zone-window-display");
+  if (windowElement && state.zoneCount && state.zoneWindowMs) {
+    windowElement.textContent = `${state.zoneCount} zones, ${Math.round(state.zoneWindowMs / 60000)} min each`;
+  }
+
+  const immunityElement = document.getElementById("catch-immunity-display");
+  if (immunityElement && state.catchImmunity != null) {
+    immunityElement.textContent = state.catchImmunity > 0 ? `${state.catchImmunity} min` : "None";
   }
 
   // Update play radius display
@@ -522,7 +542,7 @@ function handleRunnerLocation(data) {
 // Handle target reached event
 function handleTargetReached(data) {
   console.log("Target reached:", data);
-  UI.showNotification(`${data.username} reached a target!`, "success");
+  UI.showNotification("You reached your final target. You win!", "success");
   Game.updateGameState(data.gameState);
 }
 
@@ -535,31 +555,60 @@ function handleNewTarget(data) {
   }
 }
 
-// Handle target radius update event
-function handleTargetRadiusUpdate(data) {
-  console.log("Target radius updated:", data);
+// A zone was captured inside its window, revealing the next one
+function handleZoneCaptured(data) {
+  console.log("Zone captured:", data);
 
-  // Display the points earned notification if points were earned
-  if (data.pointsValue && data.earnedPoints) {
-    UI.showNotification(`You earned ${data.earnedPoints} points! Target is getting smaller!`, "success");
+  const opensIn = zoneUtils.formatCountdown(data.windowOpenTime - Date.now());
+  UI.showNotification(`Zone ${data.capturedZoneNumber} captured! Zone ${data.zoneNumber} opens in ${opensIn}.`, "success");
+
+  Game.updateGameState(data.gameState);
+}
+
+// A zone's window closed before this runner reached it. What it cost them
+// arrives separately as shield_lost or runner_caught.
+function handleZoneMissed(data) {
+  console.log("Zone missed:", data);
+  UI.showNotification(`Zone ${data.missedZoneNumber} closed. Zone ${data.zoneNumber} is open now.`, "warning");
+}
+
+// Shields are public, so everyone hears when one is spent
+function handleShieldLost(data) {
+  console.log("Shield lost:", data);
+
+  const cause = data.reason === "missed_zone" ? `missing zone ${data.zoneNumber}` : "being caught";
+
+  if (data.playerId === gameState.playerId) {
+    const immuneFor = data.immunityUntil ? ` You are immune for ${zoneUtils.formatCountdown(data.immunityUntil - Date.now())}.` : "";
+    UI.showNotification(`Your shield took the hit for ${cause}. One more and you are out.${immuneFor}`, "warning");
   } else {
-    UI.showNotification("Zone captured! New zone has been revealed...", "info");
+    UI.showNotification(`${data.username} lost their shield (${cause}).`, "info");
   }
 
-  // Update game state
-  Game.updateGameState(data.gameState);
+  socket.emit("resync_game_state", { roomId: gameState.roomId });
+}
+
+// The server turned down a catch because that runner is still immune
+function handleCatchRejected(data) {
+  console.log("Catch rejected:", data);
+  UI.showNotification(`${data.username} is immune for another ${zoneUtils.formatCountdown(data.immunityUntil - Date.now())}.`, "warning");
 }
 
 function handleRunnerCaught(data) {
   console.log("Runner caught:", data);
-  UI.showNotification(`${data.username} has been caught!`, "warning");
 
-  // Check if we're the caught player
-  if (data.caughtPlayerId === gameState.playerId) {
+  const isMe = data.caughtPlayerId === gameState.playerId;
+  const missedZone = data.reason === "missed_zone";
+
+  if (isMe) {
+    UI.showNotification(missedZone ? `You missed zone ${data.zoneNumber} with no shield left. You are a Hunter now.` : "You have been caught! You are now a Hunter.", "warning");
+
     // Change our team to hunter
     gameState.team = "hunter";
     saveGameSession();
     Game.updateTeamUI("hunter");
+  } else {
+    UI.showNotification(missedZone ? `${data.username} missed zone ${data.zoneNumber} and is out!` : `${data.username} has been caught!`, "warning");
   }
 
   socket.emit("resync_game_state", { roomId: gameState.roomId });
@@ -578,11 +627,11 @@ function updateGameOverUI(data) {
   document.getElementById("final-duration").textContent = `${state.gameDuration} min`;
 
   // Count reached targets
-  const targetsReached = state.targets.filter((t) => t.reachedBy).length;
+  const targetsReached = state.targets.filter((t) => t.status === "reached").length;
   document.getElementById("targets-reached").textContent = targetsReached;
 
-  // Count caught runners
-  const runnersCaught = state.players.filter((p) => p.team === "runner" && p.status === "caught").length;
+  // Runners who went out joined the hunters, so count them by status
+  const runnersCaught = state.players.filter((p) => p.status === "caught").length;
   document.getElementById("runners-caught").textContent = runnersCaught;
 
   // Populate all player scores
@@ -792,21 +841,15 @@ function returnToActiveGame() {
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
 
-// Handle zone activated event
-function handleZoneActivated(data) {
-  console.log("Zone activated:", data);
-  UI.showNotification("A zone has been activated! You can now capture it.", "success");
-
-  // Update game state with the latest data
-  Game.updateGameState(data.gameState);
-}
-
 // Handle runner won event
 function handleRunnerWon(data) {
   console.log("Runner won:", data);
-  UI.showNotification(`${data.username} has reached their target and won!`, "success");
 
-  // Request updated game state
+  // The winner already heard about it as target_reached
+  if (data.playerId !== gameState.playerId) {
+    UI.showNotification(`${data.username} has reached their target and won!`, "success");
+  }
+
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
 

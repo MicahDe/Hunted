@@ -19,11 +19,20 @@ module.exports = {
     // Default play area radius in meters
     defaultPlayAreaRadius: 5000,
 
-    // Default game duration in minutes
+    // Default game duration in minutes. The game is split into one equal zone
+    // window per radius level, so 60 minutes over 6 zones gives a zone every 10
+    // minutes: zone 1 from 0-10, zone 2 from 10-20, the last from 50-60.
     defaultGameDuration: 60,
 
-    // Target radius levels in meters
-    targetRadiusLevels: [2000, 1000, 500, 250, 125], // If modifying this, also modify the radiusLevels in map.js
+    // Target radius levels in meters, one per zone, largest first
+    targetRadiusLevels: [1500, 1000, 750, 500, 250, 125],
+
+    // How long a runner is safe from being caught after a catch takes their
+    // shield, in minutes. Configurable per room at setup.
+    defaultCatchImmunity: 3,
+
+    // How often the server checks rooms for zone windows closing
+    scheduleTickInterval: 1000,
 
     // Base points per target
     baseTargetPoints: 2,

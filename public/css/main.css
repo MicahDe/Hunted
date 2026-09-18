@@ -1084,27 +1084,22 @@ textarea:focus {
 /* Map circle styling */
 .map-circle-target {
   stroke-dasharray: 5, 5;
+  opacity: 0.85;
 }
 
-/* Target level indicators */
-.map-circle-target-level-2000 {
-  stroke: rgba(255, 0, 0, 0.7);
+/* A zone's colour says where it is in its window: green while it can be
+   captured, yellow while it is still locked, orange once the window has gone */
+.map-circle-zone-open {
+  stroke: rgba(76, 175, 80, 0.9);
+  stroke-dasharray: none;
 }
 
-.map-circle-target-level-1000 {
-  stroke: rgba(255, 153, 0, 0.7);
+.map-circle-zone-locked {
+  stroke: rgba(255, 235, 59, 0.85);
 }
 
-.map-circle-target-level-500 {
-  stroke: rgba(255, 255, 0, 0.7);
-}
-
-.map-circle-target-level-250 {
-  stroke: rgba(0, 255, 0, 0.7);
-}
-
-.map-circle-target-level-125 {
-  stroke: rgba(0, 255, 255, 0.7);
+.map-circle-zone-closed {
+  stroke: rgba(239, 125, 84, 0.85);
 }
 
 .map-player-popup {
@@ -1117,29 +1112,6 @@ textarea:focus {
 
 .map-player-popup-runner {
   color: var(--color-runner);
-}
-
-/* Target circles with different colors */
-.map-circle-target-level-2000 {
-  opacity: 0.7;
-}
-
-.map-circle-target-level-1000 {
-  opacity: 0.75;
-}
-
-.map-circle-target-level-500 {
-  opacity: 0.8;
-}
-
-.map-circle-target-level-250 {
-  opacity: 0.85;
-}
-
-.map-circle-target-level-125 {
-  opacity: 0.9;
-  z-index: 1000;
-  /* Make sure innermost circles appear on top */
 }
 
 .time-indicator {
@@ -1158,6 +1130,35 @@ textarea:focus {
 
 .player-status.caught {
   color: var(--color-error);
+}
+
+.player-status.won {
+  color: var(--color-success);
+}
+
+/* Shield state beside a runner's name, so hunters can see who is worth chasing */
+.player-shield {
+  margin-left: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.player-shield.held {
+  color: #64b5f6;
+}
+
+.player-shield.immune {
+  color: #4caf50;
+}
+
+.player-shield.spent {
+  color: #ef7d54;
+}
+
+.lobby-note {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
 }
 
 /* Each runner's map colour beside their name in the game menu, as a legend for the trails */
@@ -1330,17 +1331,49 @@ textarea:focus {
   white-space: nowrap;
 }
 
-#zone-status-value.zone-active {
+#zone-status-value.zone-open {
   color: #4caf50;
 }
 
-#zone-status-value.zone-inactive {
+#zone-status-value.zone-locked {
+  color: #ffeb3b;
+}
+
+/* The last minute of a window, with the zone still uncaptured */
+#zone-status-value.zone-closing {
+  color: #ef7d54;
+  animation: blink 1s infinite;
+}
+
+#zone-status-value.zone-captured {
+  color: #4caf50;
+}
+
+/* Shields are public: everyone can see who still has one, and who is briefly
+   immune after spending theirs on a catch */
+#shield-status-value {
+  font-weight: bold;
+  font-size: var(--font-size-md);
+  white-space: nowrap;
+}
+
+#shield-status-value.shield-held {
+  color: #64b5f6;
+}
+
+#shield-status-value.shield-immune {
+  color: #4caf50;
+  animation: blink 1s infinite;
+}
+
+#shield-status-value.shield-spent {
   color: #ef7d54;
 }
 
-#zone-status-value.zone-countdown {
-  color: #ffeb3b;
-  animation: blink 1s infinite;
+#game-clock-value {
+  font-weight: bold;
+  font-size: var(--font-size-md);
+  white-space: nowrap;
 }
 
 /* Zones remaining display styles */

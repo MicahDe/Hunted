@@ -42,6 +42,9 @@ const GameMap = {
   // Latest details of other players, so labels can update between pings
   playerDataCache: {},
 
+  // Shield and immunity per player, from the last game state
+  shieldStates: {},
+
   // Runner map colours, read from variables.css
   runnerColors: [],
 
@@ -467,7 +470,7 @@ const GameMap = {
     if (this.playerMarker) {
       // Update marker position
       this.playerMarker.setLatLng([latitude, longitude]);
-      
+
       // Update label position
       if (this.playerLabel) {
         this.playerLabel.setLatLng([latitude, longitude]);
@@ -545,7 +548,7 @@ const GameMap = {
     if (!lat || !lng) return;
 
     // Cache what the label timer needs to keep "ago" times counting up between pings
-    this.playerDataCache[playerId] = { username, team, lastPingTime, colorIndex, location: { lat, lng } };
+    this.playerDataCache[playerId] = { playerId, username, team, lastPingTime, colorIndex, location: { lat, lng } };
 
     // Select icon based on team
     const playerIcon = team === "hunter" ? this.icons.hunter : this.icons.runner;
@@ -707,7 +710,8 @@ const GameMap = {
     // Opacity ranges from 1.0 (fresh) to 0.8 (5 mins old)
     marker.setOpacity(Math.max(0.8, 1 - (secondsAgo / 300) * 0.2));
     marker.getPopup().setContent(this.playerPopupContent(player, timeAgo));
-    this.setLabelText(this.runnerLabels[playerId], `${player.username}: ${timeAgo} ago`);
+    const shield = this.shieldLabel(playerId);
+    this.setLabelText(this.runnerLabels[playerId], `${player.username}${shield ? shield.badge : ""}: ${timeAgo} ago`);
 
     const trail = this.runnerTrails[playerId];
     if (!trail) return;
@@ -756,6 +760,13 @@ const GameMap = {
     name.textContent = player.username;
 
     popup.append(name, document.createElement("br"), `Last seen: ${timeAgo} ago`);
+
+    const shield = this.shieldLabel(player.playerId);
+
+    if (shield) {
+      popup.append(document.createElement("br"), shield.detail);
+    }
+
     return popup;
   },
 
@@ -789,7 +800,7 @@ const GameMap = {
   },
 
   // Update targets on map
-  updateTargets: function (targets, playerTeam) {
+  updateTargets: function (targets, playerTeam, radiusLevels) {
     if (!this.gameMap) return;
     if (playerTeam === "hunter") {
       console.log("Skipping targets for hunter");
@@ -830,35 +841,33 @@ const GameMap = {
         // Create a feature group to hold all circles
         this.targetCircles[target.targetId] = L.featureGroup().addTo(this.gameMap);
 
-        // Get radius levels from the game config
-        const radiusLevels = [2000, 1000, 500, 250, 125]; // Should really be getting this from config.game.targetRadiusLevels
+        // The ladder of zone sizes, so each circle sits inside the one before it
+        const levels = radiusLevels && radiusLevels.length ? radiusLevels : zoneUtils.DEFAULT_RADIUS_LEVELS;
 
         // Generate positions for nested circles
-        const circlePositions = geoUtils.generateNestedCirclePositions(target.location.lat, target.location.lng, radiusLevels);
+        const circlePositions = geoUtils.generateNestedCirclePositions(target.location.lat, target.location.lng, levels);
 
-        // Determine if the zone is active
-        const isActive = target.zoneStatus === "active" || (target.activationTime && Date.now() > target.activationTime);
+        // A zone can only be captured inside its own window, so its colour says
+        // whether it is worth running for right now
+        const zoneStatus = target.zoneStatus || "open";
+        const isOpen = zoneStatus === "open";
+        const circleColor = isOpen ? "#4caf50" : zoneStatus === "locked" ? "#ffeb3b" : "#ef7d54";
 
         // Create each circle at its calculated position
-        circlePositions.forEach((position, index) => {
+        circlePositions.forEach((position) => {
           if (position.radius !== target.radiusLevel) {
             return;
           }
-
-          // Use different colors for active vs inactive zones
-          const circleColor = isActive ? "#4caf50" : "#ef7d54";
-          const fillOpacity = 0.12; // A heavier fill muddies the dark map and hides trails
-          const dashArray = isActive ? null : "5, 5";
 
           // Create circle with the specified radius at the calculated position
           const circle = L.circle([position.lat, position.lng], {
             radius: position.radius,
             color: circleColor,
             fillColor: circleColor,
-            fillOpacity: fillOpacity,
+            fillOpacity: 0.12, // A heavier fill muddies the dark map and hides trails
             weight: 2,
-            dashArray: dashArray,
-            className: `map-circle-target map-circle-target-level-${position.radius} ${isActive ? "active-zone" : "inactive-zone"}`,
+            dashArray: isOpen ? null : "5, 5",
+            className: `map-circle-target map-circle-zone-${zoneStatus}`,
           });
 
           // Add the circle to the feature group
@@ -866,6 +875,45 @@ const GameMap = {
         });
       }
     }
+  },
+
+  // Shields are public, so the map can show who still has one and who is
+  // currently immune. Called whenever a new game state arrives.
+  setShieldStates: function (players) {
+    this.shieldStates = {};
+
+    (players || []).forEach((player) => {
+      this.shieldStates[player.playerId] = {
+        team: player.team,
+        status: player.status,
+        shieldActive: player.shieldActive,
+        immunityUntil: player.immunityUntil,
+      };
+    });
+
+    Object.keys(this.playerDataCache).forEach((playerId) => this.refreshPlayerTimes(playerId));
+  },
+
+  // How a runner's shield reads right now: a badge for their label, and a line
+  // for their popup
+  shieldLabel: function (playerId) {
+    const player = this.shieldStates[playerId];
+
+    if (!player || player.team !== "runner" || player.status === "won") {
+      return null;
+    }
+
+    const shield = zoneUtils.shieldState({ shieldActive: player.shieldActive, immunityUntil: player.immunityUntil }, Date.now());
+
+    if (shield.immune) {
+      return { badge: " ⏱", detail: `Immune for ${zoneUtils.formatCountdown(shield.immuneMsRemaining)}` };
+    }
+
+    if (shield.hasShield) {
+      return { badge: " 🛡", detail: "Shield intact" };
+    }
+
+    return { badge: "", detail: "No shield - one more and they are out" };
   },
 
   // Remove a player's marker, label and trail
