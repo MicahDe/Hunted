@@ -192,18 +192,25 @@ function calculateDestination(lat, lng, bearing, distance) {
  *
  * Every runner in a game shares one final zone, so the chain is what keeps the
  * hunt individual: each zone is placed at a random offset from the one inside
- * it, far enough over to look different from another runner's, but never so far
- * that the inner zone escapes it. What a runner learns therefore only ever
- * narrows, and two runners racing for the same final zone are told different
- * things on the way there.
+ * it, far enough over to look different from another runner's, but not so far
+ * that the inner zone escapes it. Two runners racing for the same final zone
+ * are therefore told different things on the way there.
+ *
+ * The overhang loosens that nesting on purpose. At 0 every zone holds the one
+ * inside it exactly, which makes the circles easy to intersect and pin down; a
+ * little slack lets an inner zone hang over its parent's edge, so the picture a
+ * runner builds is approximate rather than a solvable puzzle. It compounds
+ * along the chain, so the final zone can sit a little outside the outer zones.
  *
  * @param {number} finalLat - Latitude of the shared final zone
  * @param {number} finalLng - Longitude of the shared final zone
  * @param {Array<number>} radiusLevels - Zone radii in meters, largest first
+ * @param {number} [overhang=0] - How far an inner zone may hang outside its
+ *   parent, as a fraction of the inner zone's own radius
  * @returns {Array<{lat: number, lng: number, radius: number}>} One zone per
- *   radius level, in the same order, each containing the next
+ *   radius level, in the same order
  */
-function generateZoneChain(finalLat, finalLng, radiusLevels) {
+function generateZoneChain(finalLat, finalLng, radiusLevels, overhang = 0) {
   // The last zone is the final zone itself
   let inner = {
     lat: finalLat,
@@ -216,8 +223,9 @@ function generateZoneChain(finalLat, finalLng, radiusLevels) {
   for (let i = radiusLevels.length - 2; i >= 0; i--) {
     const radius = radiusLevels[i];
 
-    // Offsetting by at most the difference in radii keeps the inner zone inside
-    const slack = Math.max(0, radius - inner.radius);
+    // The difference in radii is how far the centres can be apart with the
+    // inner zone still tucked inside; the overhang lets it hang over the edge
+    const slack = Math.max(0, radius - inner.radius + overhang * inner.radius);
     const distance = Math.sqrt(Math.random()) * slack;
     const bearing = Math.random() * 360;
     const centre = calculateDestination(inner.lat, inner.lng, bearing, distance);
@@ -227,6 +235,28 @@ function generateZoneChain(finalLat, finalLng, radiusLevels) {
   }
 
   return zones;
+}
+
+/**
+ * The furthest the final zone can end up from a zone's centre
+ *
+ * Each step of the chain can push the zones apart by the difference in their
+ * radii plus the overhang, and those steps compound, so an outer zone is only
+ * guaranteed to hold the final zone when the overhang is zero.
+ *
+ * @param {number} zoneIndex - Which zone, 0 being the largest
+ * @param {Array<number>} radiusLevels - Zone radii in meters, largest first
+ * @param {number} [overhang=0] - See generateZoneChain
+ * @returns {number} Worst case distance in meters
+ */
+function maxZoneDrift(zoneIndex, radiusLevels, overhang = 0) {
+  let drift = 0;
+
+  for (let i = zoneIndex; i < radiusLevels.length - 1; i++) {
+    drift += Math.max(0, radiusLevels[i] - radiusLevels[i + 1] + overhang * radiusLevels[i + 1]);
+  }
+
+  return drift;
 }
 
 if (typeof module !== "undefined" && module.exports) {
@@ -240,6 +270,7 @@ if (typeof module !== "undefined" && module.exports) {
     calculateBearing,
     calculateDestination,
     generateZoneChain,
+    maxZoneDrift,
   };
 } else if (typeof window !== "undefined") {
   // Browser environment
@@ -252,5 +283,6 @@ if (typeof module !== "undefined" && module.exports) {
     calculateBearing,
     calculateDestination,
     generateZoneChain,
+    maxZoneDrift,
   };
 }

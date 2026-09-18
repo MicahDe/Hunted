@@ -14,9 +14,10 @@
  * hunter who just caught them can't immediately catch them again.
  */
 
-// The client's copy of the zone ladder, for screens shown before any game state
-// has arrived. Kept in step with config.game.targetRadiusLevels by a test.
-const DEFAULT_RADIUS_LEVELS = [750, 500, 350, 240, 160, 110];
+// The client's copy of the zone settings, for screens shown before any game
+// state has arrived. Kept in step with the server's config by a test.
+const DEFAULT_RADIUS_LEVELS = [800, 625, 490, 365, 240, 140];
+const DEFAULT_ZONE_OVERHANG = 0.1;
 
 // Zone windows are sized from the game duration, so every game ends on the
 // close of the final zone's window.
@@ -93,6 +94,7 @@ function formatCountdown(ms) {
 
 const zoneUtils = {
   DEFAULT_RADIUS_LEVELS,
+  DEFAULT_ZONE_OVERHANG,
   zoneWindowMs,
   zoneWindow,
   currentZoneIndex,

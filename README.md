@@ -34,7 +34,8 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 
 **Zone Windows:**
 - The game duration is split evenly into one window per zone, so a 60 minute game over six zones opens a zone every 10 minutes: zone 1 from minute 0-10, zone 2 from 10-20, and the final zone from 50-60
-- Zones close in from 750m down to 110m, each roughly two thirds of the one before, and every one of them contains the final zone. They are placed around the final zone, so they can sit partly outside the target area
+- Zones close in from 800m down to 140m, each drawn around the final zone, so they can sit partly outside the target area
+- The zones do not nest exactly. Each one may hang up to a tenth of its own radius outside the one it sits in (`zoneOverhang`), which keeps a Runner's picture approximate rather than a set of circles to intersect
 - A zone can only be captured while its window is running, and only with the app open from inside the zone
 - Capturing a zone early reveals the next one straight away so Runners can start moving, but it stays **locked** until its own window opens
 - A window that closes with the zone uncaptured costs the Runner a shield, and they move on to the next zone with everyone else

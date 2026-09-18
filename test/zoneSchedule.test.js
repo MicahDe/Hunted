@@ -155,11 +155,14 @@ async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration
       }
     },
 
-    // Ping from inside the runner's current zone: the target point is inside
-    // every circle drawn around it
+    // Ping from the middle of the zone the runner is on. The zones are allowed
+    // to hang outside each other, so their own centre is the one point that is
+    // certainly inside.
     pingInsideZone: async (username) => {
       const target = await get("SELECT * FROM targets WHERE room_id = ? AND player_id = ?", [roomId, players[username].playerId]);
-      players[username].socket.fire("location_update", { lat: target.lat, lng: target.lng });
+      const zone = JSON.parse(target.zones)[target.zone_index || 0];
+
+      players[username].socket.fire("location_update", { lat: zone.lat, lng: zone.lng });
       await settle();
     },
   };

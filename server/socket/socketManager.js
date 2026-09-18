@@ -776,6 +776,7 @@ module.exports = function (io, db) {
 
     return {
       radiusLevels,
+      zoneOverhang: config.game.zoneOverhang,
       zoneCount,
       gameDuration,
       windowMs,
@@ -1448,7 +1449,7 @@ module.exports = function (io, db) {
 
     // Everyone is racing for the same final zone, but by their own route in:
     // each runner gets their own chain of zones closing in on it
-    const zones = geoUtils.generateZoneChain(room.final_lat, room.final_lng, schedule.radiusLevels);
+    const zones = geoUtils.generateZoneChain(room.final_lat, room.final_lng, schedule.radiusLevels, schedule.zoneOverhang);
 
     // Start on whatever zone the clock is on, so a runner who joins late isn't
     // handed a window that closed before they arrived

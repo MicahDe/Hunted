@@ -19,17 +19,22 @@ module.exports = {
     // Default target area radius in meters. The target area is only a
     // constraint on where the final zone is hidden - it does not bound the
     // zones, the players, or how far the game ranges.
-    defaultTargetAreaRadius: 500,
+    defaultTargetAreaRadius: 400,
 
     // Default game duration in minutes. The game is split into one equal zone
     // window per radius level, so 60 minutes over 6 zones gives a zone every 10
     // minutes: zone 1 from 0-10, zone 2 from 10-20, the last from 50-60.
     defaultGameDuration: 60,
 
-    // Zone radii in meters, one per zone, largest first. Each is roughly two
-    // thirds of the one before, closing from a first zone a runner has to walk
-    // across to a final zone they have to stand in.
-    targetRadiusLevels: [750, 500, 350, 240, 160, 110],
+    // Zone radii in meters, one per zone, largest first, closing from a first
+    // zone a runner has to walk across to a final zone they have to stand in
+    targetRadiusLevels: [800, 625, 490, 365, 240, 140],
+
+    // How far a zone may hang outside the one it sits in, as a fraction of its
+    // own radius. At 0 the circles nest exactly, which makes them easy to
+    // intersect and pin down; a little slack keeps a runner's picture
+    // approximate. See geoUtils.generateZoneChain.
+    zoneOverhang: 0.1,
 
     // How long a runner is safe from being caught after a catch takes their
     // shield, in minutes. Configurable per room at setup.
