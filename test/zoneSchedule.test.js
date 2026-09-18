@@ -399,6 +399,13 @@ test("the game ends when the clock runs out, and stragglers lose a life on the w
   const runner = await game.player("Ruby");
   assert.strictEqual(runner.shield_active, 0, "the final window closed uncaptured");
 
+  // A shield saves them from becoming a hunter, but it cannot win them the
+  // game: only capturing the final zone inside its window does that
+  assert.strictEqual(runner.team, "runner");
+  assert.strictEqual(runner.status, "active");
+  assert.notStrictEqual(runner.status, "won");
+  assert.strictEqual((await game.target("Ruby")).status, "active", "their final target was never reached");
+
   const over = game.of("game_over");
   assert.strictEqual(over.length, 1);
   assert.strictEqual((await game.room()).status, "completed");

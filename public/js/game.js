@@ -306,28 +306,28 @@ const Game = {
 
     zoneContainer.style.display = "block";
     zonesContainer.style.display = "block";
-    zonesValue.textContent = `Zone ${target.zoneNumber} of ${this.gameState.zoneCount}`;
+    zonesValue.textContent = `Zone ${target.zoneNumber}/${this.gameState.zoneCount}`;
 
     const status = zoneUtils.zoneStatusAt(now, { openTime: target.windowOpenTime, closeTime: target.windowCloseTime });
     zoneValue.classList.remove("zone-open", "zone-locked", "zone-closing", "zone-captured");
 
     if (status === "locked") {
       // They captured their last zone, so this one is revealed but not yet open
-      zoneValue.textContent = `Zone ${target.zoneNumber}: 🔒 ${zoneUtils.formatCountdown(target.windowOpenTime - now)}`;
+      zoneValue.textContent = `🔒 ${zoneUtils.formatCountdown(target.windowOpenTime - now)}`;
       zoneValue.classList.add("zone-locked");
       return;
     }
 
     if (status === "open") {
       const remaining = target.windowCloseTime - now;
-      zoneValue.textContent = `Zone ${target.zoneNumber}: ⏳ ${zoneUtils.formatCountdown(remaining)}`;
+      zoneValue.textContent = `⏳ ${zoneUtils.formatCountdown(remaining)}`;
 
       // Under a minute left to reach it, with a life riding on it
       zoneValue.classList.add(remaining < 60 * 1000 ? "zone-closing" : "zone-open");
       return;
     }
 
-    zoneValue.textContent = `Zone ${target.zoneNumber}: missed`;
+    zoneValue.textContent = "⏳ missed";
     zoneValue.classList.add("zone-closing");
   },
 
@@ -351,7 +351,7 @@ const Game = {
     value.classList.remove("shield-held", "shield-immune", "shield-spent");
 
     if (shield.immune) {
-      value.textContent = `🛡 Immune ${zoneUtils.formatCountdown(shield.immuneMsRemaining)}`;
+      value.textContent = `🛡 ${zoneUtils.formatCountdown(shield.immuneMsRemaining)}`;
       value.classList.add("shield-immune");
     } else if (shield.hasShield) {
       value.textContent = "🛡 Shield";

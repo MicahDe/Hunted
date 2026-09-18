@@ -347,6 +347,19 @@ p {
   box-shadow: var(--shadow-sm);
 }
 
+/* Reporting yourself caught is off while your immunity holds, so the button
+   should not still look like the alarm it usually is */
+.danger-btn:disabled {
+  background-color: var(--color-surface-variant);
+  color: var(--color-text-tertiary);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.danger-btn:disabled::before {
+  content: none;
+}
+
 /* Forms */
 .form-group {
   margin-bottom: var(--spacing-4);
@@ -567,20 +580,23 @@ textarea:focus {
 
 .game-status {
   display: flex;
-  justify-content: space-between;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-1);
+  min-width: 0;
   color: var(--color-text-on-dark);
   font-family: var(--font-family-mono);
   letter-spacing: 1px;
 }
 
 .status-item {
-  /*padding: 5px 10px;*/
   background-color: black;
-  margin-right: var(--spacing-2);
-  padding: var(--spacing-2) var(--spacing-3);
+  padding: var(--spacing-1) var(--spacing-2);
 }
 
 .menu-btn {
+  flex: none;
   background: none;
   color: var(--color-text-on-dark);
   font-size: var(--font-size-2xl);
@@ -1325,9 +1341,12 @@ textarea:focus {
   font-family: var(--font-family-mono);
 }
 
-#zone-status-value {
+#zone-status-value,
+#shield-status-value,
+#game-clock-value,
+#zones-remaining-value {
   font-weight: bold;
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
@@ -1351,12 +1370,6 @@ textarea:focus {
 
 /* Shields are public: everyone can see who still has one, and who is briefly
    immune after spending theirs on a catch */
-#shield-status-value {
-  font-weight: bold;
-  font-size: var(--font-size-md);
-  white-space: nowrap;
-}
-
 #shield-status-value.shield-held {
   color: #64b5f6;
 }
@@ -1368,12 +1381,6 @@ textarea:focus {
 
 #shield-status-value.shield-spent {
   color: #ef7d54;
-}
-
-#game-clock-value {
-  font-weight: bold;
-  font-size: var(--font-size-md);
-  white-space: nowrap;
 }
 
 /* Zones remaining display styles */
@@ -1388,10 +1395,7 @@ textarea:focus {
 }
 
 #zones-remaining-value {
-  font-weight: bold;
-  font-size: var(--font-size-md);
   color: #64b5f6;
-  white-space: nowrap;
 }
 
 @keyframes blink {
