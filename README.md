@@ -40,6 +40,8 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 - A window that closes with the zone uncaptured costs the Runner a shield, and they move on to the next zone with everyone else
 - The game ends when the final zone's window closes
 
+**Sizing it up:** with the server running, `/zone-preview.html` draws a target area and a few Runners' zone chains on the map, using the game's own zone code. Handy for picking a target area radius before a game.
+
 **Shields:**
 - Every Runner starts with one shield - a dog's life
 - The shield is shared between the two ways of going out: missing a zone window and being caught

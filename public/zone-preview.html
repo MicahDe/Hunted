@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HUNTED - Zone Preview</title>
+
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/hunted-icon-32.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cutive+Mono&display=swap" rel="stylesheet" />
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <link rel="stylesheet" href="css/variables.css" />
+
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: var(--font-family-mono);
+        background-color: var(--color-background);
+        color: var(--color-text-primary);
+      }
+
+      #preview-map {
+        position: absolute;
+        inset: 0;
+      }
+
+      .preview-panel {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 1000;
+        width: min(330px, calc(100vw - 20px));
+        max-height: calc(100vh - 20px);
+        overflow-y: auto;
+        padding: var(--spacing-3) var(--spacing-4);
+        background-color: rgba(18, 18, 18, 0.93);
+        border: 1px solid var(--color-border);
+        border-radius: var(--border-radius-md);
+        font-size: var(--font-size-sm);
+        line-height: 1.5;
+      }
+
+      .preview-panel h1 {
+        margin: 0 0 var(--spacing-1);
+        font-size: var(--font-size-md);
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .preview-panel h1::after {
+        content: " -";
+        color: var(--color-text-tertiary);
+      }
+
+      .preview-panel.collapsed h1::after {
+        content: " +";
+      }
+
+      .preview-panel.collapsed > :not(h1) {
+        display: none;
+      }
+
+      .preview-panel p {
+        margin: 0 0 var(--spacing-3);
+        color: var(--color-text-tertiary);
+        font-size: var(--font-size-xs);
+      }
+
+      .preview-panel label {
+        display: block;
+        margin-top: var(--spacing-2);
+        color: var(--color-text-tertiary);
+        font-size: var(--font-size-xs);
+      }
+
+      .preview-panel input {
+        width: 100%;
+        margin-top: 2px;
+        padding: 5px 7px;
+        background-color: var(--color-surface);
+        color: var(--color-text-primary);
+        border: 1px solid var(--color-border);
+        border-radius: var(--border-radius-sm);
+        font-family: inherit;
+        font-size: var(--font-size-sm);
+      }
+
+      .preview-row {
+        display: flex;
+        gap: var(--spacing-2);
+      }
+
+      .preview-row > div {
+        flex: 1;
+      }
+
+      .preview-panel button {
+        width: 100%;
+        margin-top: var(--spacing-2);
+        padding: 7px 10px;
+        background-color: var(--color-surface-variant);
+        color: var(--color-text-primary);
+        border: 1px solid var(--color-border);
+        border-radius: var(--border-radius-sm);
+        font-family: inherit;
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+      }
+
+      .preview-panel button:hover {
+        background-color: var(--color-primary-light);
+      }
+
+      .preview-readout {
+        margin-top: var(--spacing-3);
+        padding-top: var(--spacing-2);
+        border-top: 1px solid var(--color-border);
+        font-size: var(--font-size-xs);
+        color: var(--color-text-tertiary);
+      }
+
+      .preview-readout b {
+        color: var(--color-text-primary);
+        font-weight: normal;
+      }
+
+      .preview-swatch {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        margin-right: 5px;
+        border-radius: 50%;
+        vertical-align: middle;
+      }
+
+      .preview-label {
+        background: transparent;
+        border: none;
+        display: flex;
+        justify-content: center;
+      }
+
+      .preview-label div {
+        display: inline-block;
+        padding: 0 3px;
+        font-size: 10px;
+        color: #ffffff;
+        background-color: rgba(0, 0, 0, 0.65);
+        border-radius: 2px;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="preview-map"></div>
+
+    <div class="preview-panel">
+      <h1 id="preview-toggle" title="Show or hide the controls">Zone Preview</h1>
+      <p>Every Runner races for one hidden final zone. Each gets their own chain of circles closing in on it, so no two Runners are shown the same picture. The target area only decides where that final zone may be hidden - the zones are drawn around it and can reach outside.</p>
+
+      <label for="preview-centre">Target area centre (lat, lng)</label>
+      <input id="preview-centre" value="53.371329, -1.549036" />
+
+      <div class="preview-row">
+        <div>
+          <label for="preview-radius">Target area radius (m)</label>
+          <input id="preview-radius" type="number" value="500" min="100" step="50" />
+        </div>
+        <div>
+          <label for="preview-runners">Runners</label>
+          <input id="preview-runners" type="number" value="3" min="1" max="6" />
+        </div>
+      </div>
+
+      <label for="preview-levels">Zone radii (m, largest first)</label>
+      <input id="preview-levels" />
+
+      <button id="preview-reshuffle">Reshuffle</button>
+
+      <div id="preview-readout" class="preview-readout"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- The real thing: the same zone maths the game runs on -->
+    <script src="/shared/utils/geoUtils.js"></script>
+    <script src="/shared/utils/zoneUtils.js"></script>
+
+    <script>
+      // Runner colours, read from the game's own stylesheet so the preview
+      // matches what players see on the map
+      const RUNNER_COLORS = ["#4da3ff", "#2fd48f", "#ffb020", "#ff6b6b", "#c084fc", "#22d3ee"];
+
+      const map = L.map("preview-map", { zoomControl: false }).setView([53.371329, -1.549036], 15);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(map);
+
+      L.control.zoom({ position: "topright" }).addTo(map);
+      L.control.scale({ metric: true, imperial: false }).addTo(map);
+
+      const drawn = L.layerGroup().addTo(map);
+      document.getElementById("preview-levels").value = zoneUtils.DEFAULT_RADIUS_LEVELS.join(", ");
+
+      function readCentre() {
+        const [lat, lng] = document
+          .getElementById("preview-centre")
+          .value.split(",")
+          .map((value) => parseFloat(value.trim()));
+
+        return { lat: Number.isFinite(lat) ? lat : 53.371329, lng: Number.isFinite(lng) ? lng : -1.549036 };
+      }
+
+      function readLevels() {
+        const levels = document
+          .getElementById("preview-levels")
+          .value.split(",")
+          .map((value) => parseInt(value.trim(), 10))
+          .filter((value) => Number.isFinite(value) && value > 0);
+
+        return levels.length >= 2 ? levels : zoneUtils.DEFAULT_RADIUS_LEVELS;
+      }
+
+      function label(text, color) {
+        const element = document.createElement("div");
+        element.textContent = text;
+
+        if (color) {
+          element.style.borderLeft = `3px solid ${color}`;
+        }
+
+        return element;
+      }
+
+      function draw() {
+        drawn.clearLayers();
+
+        const centre = readCentre();
+        const levels = readLevels();
+        const targetRadius = parseInt(document.getElementById("preview-radius").value, 10) || 500;
+        const runnerCount = Math.min(6, Math.max(1, parseInt(document.getElementById("preview-runners").value, 10) || 3));
+
+        // One final zone, hidden somewhere in the target area, for everybody
+        const finalZone = geoUtils.generateRandomPoint(centre.lat, centre.lng, targetRadius);
+        const rows = [];
+
+        for (let runner = 0; runner < runnerCount; runner++) {
+          const color = RUNNER_COLORS[runner % RUNNER_COLORS.length];
+          const zones = geoUtils.generateZoneChain(finalZone.lat, finalZone.lng, levels);
+
+          zones.forEach((zone, index) => {
+            L.circle([zone.lat, zone.lng], {
+              radius: zone.radius,
+              color,
+              weight: index === 0 ? 2.5 : 1.5,
+              opacity: 0.9 - index * 0.06,
+              fillColor: color,
+              fillOpacity: 0.035,
+              dashArray: index === zones.length - 1 ? null : "4, 6",
+            })
+              .bindTooltip(`Runner ${runner + 1} - zone ${index + 1} (${zone.radius}m)`, { sticky: true })
+              .addTo(drawn);
+          });
+
+          // The zone a runner is shown at kick off
+          L.marker([zones[0].lat, zones[0].lng], {
+            icon: L.divIcon({
+              className: "preview-label",
+              html: label(`Runner ${runner + 1} - zone 1`, color),
+              iconSize: [130, 14],
+              iconAnchor: [65, -6 - runner * 18],
+            }),
+            interactive: false,
+          }).addTo(drawn);
+
+          rows.push({
+            runner: runner + 1,
+            color,
+            offset: Math.round(geoUtils.calculateDistance(zones[0].lat, zones[0].lng, finalZone.lat, finalZone.lng)),
+          });
+        }
+
+        // The area the Hunters pick, over the zones so it stays readable
+        L.circle([centre.lat, centre.lng], {
+          radius: targetRadius,
+          color: "#ffffff",
+          weight: 2,
+          dashArray: "10, 8",
+          fill: false,
+          interactive: false,
+        }).addTo(drawn);
+
+        L.marker([centre.lat, centre.lng], {
+          icon: L.divIcon({
+            className: "preview-label",
+            html: label(`Target area - ${targetRadius}m`),
+            iconSize: [150, 14],
+            iconAnchor: [75, -6],
+          }),
+          interactive: false,
+        }).addTo(drawn);
+
+        // The final zone, which nobody is shown during a real game
+        L.circle([finalZone.lat, finalZone.lng], {
+          radius: levels[levels.length - 1],
+          color: "#ffffff",
+          weight: 2,
+          fillColor: "#ffffff",
+          fillOpacity: 0.25,
+        })
+          .bindTooltip("The final zone, hidden from everyone", { sticky: true })
+          .addTo(drawn);
+
+        map.setView([centre.lat, centre.lng], map.getZoom());
+
+        const readout = document.getElementById("preview-readout");
+        readout.innerHTML = "";
+
+        const summary = document.createElement("div");
+        summary.textContent = `Zones: ${levels.join("m, ")}m radius. The final zone is ${levels[levels.length - 1]}m.`;
+        readout.appendChild(summary);
+
+        rows.forEach((row) => {
+          const line = document.createElement("div");
+          line.style.marginTop = "6px";
+
+          const swatch = document.createElement("span");
+          swatch.className = "preview-swatch";
+          swatch.style.backgroundColor = row.color;
+
+          line.appendChild(swatch);
+          line.appendChild(document.createTextNode(`Runner ${row.runner}: first zone centred ${row.offset}m off the final zone`));
+          readout.appendChild(line);
+        });
+      }
+
+      document.getElementById("preview-toggle").addEventListener("click", () => {
+        document.querySelector(".preview-panel").classList.toggle("collapsed");
+        setTimeout(() => map.invalidateSize(), 50);
+      });
+
+      document.getElementById("preview-reshuffle").addEventListener("click", draw);
+      ["preview-centre", "preview-radius", "preview-runners", "preview-levels"].forEach((id) => {
+        document.getElementById(id).addEventListener("change", draw);
+      });
+
+      draw();
+    </script>
+  </body>
+</html>
