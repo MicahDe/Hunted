@@ -249,7 +249,7 @@ function createRoom() {
   const username = document.getElementById("creator-username").value.trim();
   const gameDuration = parseInt(document.getElementById("game-duration").value);
   const catchImmunity = parseInt(document.getElementById("catch-immunity").value);
-  const playRadius = parseInt(document.getElementById("play-radius").value);
+  const targetRadius = parseInt(document.getElementById("target-radius").value);
   const teamBtn = document.querySelector("#create-room-form .team-btn.selected");
 
   if (!roomName || !username) {
@@ -288,7 +288,7 @@ function createRoom() {
     team,
     gameDuration,
     catchImmunity,
-    playRadius,
+    targetRadius,
     centralLat: location.lat,
     centralLng: location.lng,
   });
@@ -407,17 +407,21 @@ function updateLobbyUI(state) {
     immunityElement.textContent = state.catchImmunity > 0 ? `${state.catchImmunity} min` : "None";
   }
 
-  // Update play radius display
-  const playRadiusElement = document.getElementById("play-radius-display");
-  if (playRadiusElement && state.playRadius) {
-    // Convert meters to kilometers for display
-    const radiusInKm = (state.playRadius / 1000).toFixed(1);
-    playRadiusElement.textContent = `${radiusInKm}km radius`;
+  // Where the final zone might be hidden
+  const targetRadiusElement = document.getElementById("target-radius-display");
+  if (targetRadiusElement && state.targetRadius) {
+    targetRadiusElement.textContent = `${state.targetRadius}m radius`;
+  }
+
+  const hunterMessage = document.getElementById("hunter-map-message");
+
+  if (hunterMessage) {
+    hunterMessage.style.display = gameState.team === "hunter" ? "block" : "none";
   }
 
   // Update lobby map only if the player is a hunter
   if (state.centralLocation && gameState.team === "hunter") {
-    GameMap.initLobbyMap(state.centralLocation.lat, state.centralLocation.lng, state.playRadius);
+    GameMap.initLobbyMap(state.centralLocation.lat, state.centralLocation.lng, state.targetRadius);
     // Hide runner message
     const runnerMessage = document.getElementById("runner-map-message");
     if (runnerMessage) {

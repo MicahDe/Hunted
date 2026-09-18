@@ -29,19 +29,19 @@ module.exports = function (io, db) {
     // Create a room
     socket.on("create_room", async (data) => {
       try {
-        const { roomName, username, team, gameDuration, catchImmunity, playRadius, centralLat, centralLng } = data;
+        const { roomName, username, team, gameDuration, catchImmunity, targetRadius, centralLat, centralLng } = data;
         let roomId;
 
         // Create new room
         roomId = uuidv4();
-        const settings = await createRoom(roomId, roomName, { gameDuration, catchImmunity, centralLat, centralLng, playRadius });
+        const settings = await createRoom(roomId, roomName, { gameDuration, catchImmunity, centralLat, centralLng, targetRadius });
 
         return socket.emit("room_created", {
           roomId,
           roomName,
           gameDuration: settings.gameDuration,
           catchImmunity: settings.catchImmunity,
-          playRadius,
+          targetRadius,
           centralLat,
           centralLng,
         });
@@ -533,8 +533,8 @@ module.exports = function (io, db) {
 
     await new Promise((resolve, reject) => {
       db.run(
-        "INSERT INTO rooms (room_id, room_name, game_duration, catch_immunity, central_lat, central_lng, play_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [roomId, roomName, gameDuration, catchImmunity, settings.centralLat, settings.centralLng, settings.playRadius, Date.now(), "lobby"],
+        "INSERT INTO rooms (room_id, room_name, game_duration, catch_immunity, central_lat, central_lng, target_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [roomId, roomName, gameDuration, catchImmunity, settings.centralLat, settings.centralLng, settings.targetRadius, Date.now(), "lobby"],
         function (err) {
           if (err) reject(err);
           resolve(this.lastID);
@@ -550,7 +550,7 @@ module.exports = function (io, db) {
   // the area, never the zone, and nobody is told where it landed until the game
   // is over.
   async function startRoom(room, gameStartTime) {
-    const finalZone = geoUtils.generateRandomPoint(room.central_lat, room.central_lng, room.play_radius || config.game.defaultPlayAreaRadius);
+    const finalZone = geoUtils.generateRandomPoint(room.central_lat, room.central_lng, room.target_radius || config.game.defaultTargetAreaRadius);
 
     return new Promise((resolve, reject) => {
       db.run("UPDATE rooms SET status = 'active', game_start_time = ?, final_lat = ?, final_lng = ?, end_time = NULL WHERE room_id = ?", [gameStartTime, finalZone.lat, finalZone.lng, room.room_id], function (err) {
@@ -1083,10 +1083,10 @@ module.exports = function (io, db) {
       gameDuration: schedule.gameDuration,
       gameStartTime: schedule.gameStartTime,
       endTime,
-      playArea: {
+      targetArea: {
         lat: room.central_lat,
         lng: room.central_lng,
-        radius: room.play_radius || config.game.defaultPlayAreaRadius,
+        radius: room.target_radius || config.game.defaultTargetAreaRadius,
       },
 
       // Still a secret if somehow the game is not over yet
@@ -1262,7 +1262,7 @@ module.exports = function (io, db) {
       const gameState = {
         roomId: room.room_id,
         roomName: room.room_name,
-        playRadius: room.play_radius,
+        targetRadius: room.target_radius,
         gameDuration: schedule.gameDuration,
         catchImmunity: schedule.catchImmunity,
         zoneCount: schedule.zoneCount,

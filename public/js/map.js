@@ -242,7 +242,7 @@ const GameMap = {
   },
 
   // Initialize the game map
-  initGameMap: function (centerLat, centerLng, playAreaRadius = 5000) {
+  initGameMap: function (centerLat, centerLng, targetAreaRadius) {
     // Get map container
     const mapContainer = document.getElementById("game-map");
     if (!mapContainer) return;
@@ -308,7 +308,7 @@ const GameMap = {
     // Add game boundary circle
     if (gameState.team === "hunter") {
       this.boundaryCircle = L.circle([centerLat, centerLng], {
-        radius: playAreaRadius,
+        radius: targetAreaRadius,
         color: "#999999", // Light enough to see on the dark map
         fillColor: "#ffffff",
         fillOpacity: 0.04,
@@ -383,7 +383,7 @@ const GameMap = {
   },
 
   // Initialize the lobby map
-  initLobbyMap: function (centerLat, centerLng, playAreaRadius = 5000) {
+  initLobbyMap: function (centerLat, centerLng, targetAreaRadius) {
     console.log("Initializing lobby map with coordinates:", centerLat, centerLng);
 
     // Get map container
@@ -434,7 +434,7 @@ const GameMap = {
 
     // Add game boundary circle
     L.circle([centerLat, centerLng], {
-      radius: playAreaRadius,
+      radius: targetAreaRadius,
       color: "#999999", // Light enough to see on the dark map
       fillColor: "#ffffff",
       fillOpacity: 0.04,
@@ -903,9 +903,9 @@ const GameMap = {
     const points = [];
 
     // The area the hunters picked, and never saw inside
-    if (review.playArea) {
-      L.circle([review.playArea.lat, review.playArea.lng], {
-        radius: review.playArea.radius,
+    if (review.targetArea) {
+      L.circle([review.targetArea.lat, review.targetArea.lng], {
+        radius: review.targetArea.radius,
         color: "#999999",
         fillColor: "#ffffff",
         fillOpacity: 0.04,
@@ -949,8 +949,8 @@ const GameMap = {
 
     if (points.length > 0) {
       this.reviewMap.fitBounds(L.latLngBounds(points).pad(0.2));
-    } else if (review.playArea) {
-      this.reviewMap.setView([review.playArea.lat, review.playArea.lng], 14);
+    } else if (review.targetArea) {
+      this.reviewMap.setView([review.targetArea.lat, review.targetArea.lng], 14);
     }
 
     // Leaflet needs telling once the screen it sits on is actually visible

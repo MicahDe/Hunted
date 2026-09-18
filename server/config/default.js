@@ -16,8 +16,10 @@ module.exports = {
 
   // Game config
   game: {
-    // Default play area radius in meters
-    defaultPlayAreaRadius: 5000,
+    // Default target area radius in meters. The target area is only a
+    // constraint on where the final zone is hidden - it does not bound the
+    // zones, the players, or how far the game ranges.
+    defaultTargetAreaRadius: 500,
 
     // Default game duration in minutes. The game is split into one equal zone
     // window per radius level, so 60 minutes over 6 zones gives a zone every 10

@@ -67,7 +67,6 @@ const UI = {
     document.getElementById("game-duration").value = 60;
     document.getElementById("catch-immunity").value = 3;
     this.updateZoneWindowHint();
-    this.updatePlayRadiusHint();
 
     // Reset team selection
     const teamBtns = document.querySelectorAll("#create-room-form .team-btn");
@@ -101,15 +100,6 @@ const UI = {
 
     const windowMinutes = Math.round(zoneUtils.zoneWindowMs(duration, zoneCount) / 60000);
     hint.textContent = `${zoneCount} zones, one capturable every ${windowMinutes} min`;
-  },
-
-  // A play area smaller than the first zone leaves Runners standing inside it
-  // from the off, so the first window costs them nothing
-  updatePlayRadiusHint: function () {
-    const hint = document.getElementById("play-radius-hint");
-    if (!hint) return;
-
-    hint.textContent = `The first zone is ${zoneUtils.DEFAULT_RADIUS_LEVELS[0]}m across the final one, so a play area smaller than that makes the first window a gift`;
   },
 
   // Initialize the join room screen

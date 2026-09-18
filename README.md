@@ -25,15 +25,16 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 
 ### How the Game Works
 
-**Play Area Setup:**
-- Hunters pick a loose play area: a central location (typically the starting location) and a radius
-- When the game starts, one final zone is hidden at random somewhere inside that area. It is the same final zone for every Runner, and nobody is told where it is - not the Hunters, and not the Runners
+**Target Area Setup:**
+- Hunters pick a target area: a central location (typically the starting location) and a radius, 500m by default
+- The target area decides one thing only - where the final zone may be hidden. It does not bound the zones, the players, or how far the game ranges
+- When the game starts, one final zone is hidden at a random point inside that area. It is the same final zone for every Runner, and nobody is told where it is - not the Hunters, and not the Runners
 - Each Runner is led to it by their own chain of zones, so no two Runners are shown the same circles
 - This makes the game about staying hidden nearby rather than traveling long distances, and about everyone converging on one place at the end
 
 **Zone Windows:**
 - The game duration is split evenly into one window per zone, so a 60 minute game over six zones opens a zone every 10 minutes: zone 1 from minute 0-10, zone 2 from 10-20, and the final zone from 50-60
-- Zones close in from 750m down to 110m, each roughly two thirds of the one before, and every one of them contains the final zone
+- Zones close in from 750m down to 110m, each roughly two thirds of the one before, and every one of them contains the final zone. They are placed around the final zone, so they can sit partly outside the target area
 - A zone can only be captured while its window is running, and only with the app open from inside the zone
 - Capturing a zone early reveals the next one straight away so Runners can start moving, but it stays **locked** until its own window opens
 - A window that closes with the zone uncaptured costs the Runner a shield, and they move on to the next zone with everyone else

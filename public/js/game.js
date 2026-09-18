@@ -38,7 +38,7 @@ const Game = {
     };
 
     // Set up map
-    GameMap.initGameMap(initialState.centralLocation.lat, initialState.centralLocation.lng, initialState.playRadius);
+    GameMap.initGameMap(initialState.centralLocation.lat, initialState.centralLocation.lng, initialState.targetRadius);
 
     // Initialize UI
     this.initGameUI();

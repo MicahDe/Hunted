@@ -96,7 +96,7 @@ async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration
     team: "hunter",
     gameDuration,
     catchImmunity,
-    playRadius: 1000,
+    targetRadius: 500,
     centralLat: CENTRE.lat,
     centralLng: CENTRE.lng,
   });
@@ -203,14 +203,14 @@ test("every runner is racing for the same final zone, by their own route in", as
   assert.ok(gap > 1, "both runners were shown the same first zone");
 });
 
-test("the host picks the area, and the game picks the zone inside it", async () => {
+test("the host picks the target area, and the game hides the final zone inside it", async () => {
   const game = await createGame();
   const room = await game.room();
 
   assert.ok(room.final_lat != null && room.final_lng != null, "the game should have hidden a final zone");
 
   const fromCentre = geoUtils.calculateDistance(room.final_lat, room.final_lng, CENTRE.lat, CENTRE.lng);
-  assert.ok(fromCentre <= room.play_radius + 1, `the final zone landed ${fromCentre.toFixed(0)}m out, beyond the play area`);
+  assert.ok(fromCentre <= room.target_radius + 1, `the final zone landed ${fromCentre.toFixed(0)}m out, beyond the target area`);
 });
 
 test("hunters are told nothing about anyone's zones", async () => {
