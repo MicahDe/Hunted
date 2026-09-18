@@ -64,7 +64,9 @@ const UI = {
 
     // Reset form fields
     document.getElementById("room-name").value = "";
-    document.getElementById("zone-activation-delay").value = 180;
+    document.getElementById("game-duration").value = 60;
+    document.getElementById("catch-immunity").value = 3;
+    this.updateZoneWindowHint();
 
     // Reset team selection
     const teamBtns = document.querySelectorAll("#create-room-form .team-btn");
@@ -79,6 +81,25 @@ const UI = {
       // Initialize the setup map
       GameMap.initSetupMap();
     }, 100);
+  },
+
+  // Spell out what the chosen game duration means for the zone windows: a 60
+  // minute game over six zones opens a zone every 10 minutes
+  updateZoneWindowHint: function () {
+    const durationInput = document.getElementById("game-duration");
+    const hint = document.getElementById("zone-window-hint");
+    if (!durationInput || !hint) return;
+
+    const zoneCount = zoneUtils.DEFAULT_RADIUS_LEVELS.length;
+    const duration = parseInt(durationInput.value, 10);
+
+    if (!Number.isFinite(duration) || duration <= 0) {
+      hint.textContent = `Split evenly into ${zoneCount} zone windows`;
+      return;
+    }
+
+    const windowMinutes = Math.round(zoneUtils.zoneWindowMs(duration, zoneCount) / 60000);
+    hint.textContent = `${zoneCount} zones, one capturable every ${windowMinutes} min`;
   },
 
   // Initialize the join room screen
@@ -144,24 +165,6 @@ const UI = {
     loadingOverlay.classList.remove("show");
   },
 
-  // Update time display in game
-  updateTimeDisplay: function (seconds) {
-    const timeElement = document.getElementById("time-value");
-    if (!timeElement) return;
-
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = Math.floor(seconds % 60);
-
-    timeElement.textContent = `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
-
-    // Add warning class if time is running low (less than 5 minutes)
-    if (seconds < 300) {
-      timeElement.classList.add("time-warning");
-    } else {
-      timeElement.classList.remove("time-warning");
-    }
-  },
-
   // Update player lists in game menu
   updateGamePlayerLists: function (players) {
     if (!players) return;
@@ -179,26 +182,26 @@ const UI = {
     const hunters = players.filter((p) => p.team === "hunter");
     const runners = players.filter((p) => p.team === "runner");
 
-    // Add hunters to list
+    // Add hunters to list. Runners who went out are hunters now, so say how.
     hunters.forEach((hunter) => {
       const listItem = document.createElement("li");
       listItem.className = "player-item team-hunter";
       listItem.setAttribute("data-player-id", hunter.playerId);
       listItem.innerHTML = `
                 <span class="player-name">${hunter.username}</span>
-                ${hunter.status === "caught" ? '<span class="player-status caught">Caught</span>' : ""}
+                ${hunter.status === "caught" ? `<span class="player-status caught">${hunter.eliminationReason === "missed_zone" ? "Missed zone" : "Caught"}</span>` : ""}
             `;
       hunterList.appendChild(listItem);
     });
 
-    // Add runners to list
+    // Add runners to list, with the shield each of them has left
     runners.forEach((runner) => {
       const listItem = document.createElement("li");
       listItem.className = "player-item team-runner";
       listItem.setAttribute("data-player-id", runner.playerId);
       listItem.innerHTML = `
                 <span class="player-name"><span class="player-color" style="--runner-color: ${GameMap.runnerColor(runner.colorIndex)}"></span>${runner.username}</span>
-                ${runner.status === "caught" ? '<span class="player-status caught">Caught</span>' : runner.status === "won" ? '<span class="player-status won">Won</span>' : ""}
+                ${runner.status === "won" ? '<span class="player-status won">Won</span>' : this.shieldBadge(runner)}
             `;
       runnerList.appendChild(listItem);
     });
@@ -207,6 +210,61 @@ const UI = {
     if (typeof PlayerListIndicator !== "undefined" && PlayerListIndicator.refreshIndicators) {
       PlayerListIndicator.refreshIndicators();
     }
+  },
+
+  // How a player's game ended, in words, shared by the scoreboard and the
+  // replay map so they never disagree
+  outcomeLabel: function (outcome) {
+    switch (outcome) {
+      case "won":
+        return { text: "Made it home", state: "won" };
+      case "caught":
+        return { text: "Caught", state: "out" };
+      case "missed_zone":
+        return { text: "Missed a zone", state: "out" };
+      case "out_of_time":
+        return { text: "Ran out of time", state: "timeout" };
+      case "hunter":
+        return { text: "Hunter", state: "hunter" };
+      default:
+        return { text: "Still running", state: "running" };
+    }
+  },
+
+  // A runner's shield, as everyone else sees it: still held, spent, or holding
+  // off catches for a little longer
+  shieldBadgeContent: function (runner) {
+    const shield = zoneUtils.shieldState({ shieldActive: runner.shieldActive, immunityUntil: runner.immunityUntil }, Date.now());
+
+    if (shield.immune) {
+      return { state: "immune", text: `🛡 Immune ${zoneUtils.formatCountdown(shield.immuneMsRemaining)}` };
+    }
+
+    if (shield.hasShield) {
+      return { state: "held", text: "🛡 Shield" };
+    }
+
+    return { state: "spent", text: "⚠ Last life" };
+  },
+
+  shieldBadge: function (runner) {
+    const badge = this.shieldBadgeContent(runner);
+
+    return `<span class="player-shield ${badge.state}">${badge.text}</span>`;
+  },
+
+  // Keep immunity countdowns in the menu ticking without rebuilding the lists
+  refreshShieldBadges: function (players) {
+    (players || []).forEach((player) => {
+      const item = document.querySelector(`#game-runner-list .player-item[data-player-id="${player.playerId}"]`);
+      const element = item && item.querySelector(".player-shield");
+
+      if (!element) return;
+
+      const badge = this.shieldBadgeContent(player);
+      element.className = `player-shield ${badge.state}`;
+      element.textContent = badge.text;
+    });
   },
 
   // Show team controls based on player's team

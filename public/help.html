@@ -33,6 +33,8 @@
           <section class="help-section">
             <h3>Game Overview</h3>
             <p>HUNTED is a real-time GPS-based pursuit game with players split into two teams: Hunters and Runners. Runners navigate through progressively smaller zones to reach their final target while evading Hunters who track and attempt to catch them by taking their photo.</p>
+            <p>The game runs to a clock. Each zone can only be captured during its own window - in a 60 minute game that is zone 1 from minute 0 to 10, zone 2 from 10 to 20, and the final zone from 50 to 60. Miss a window or get caught and your shield takes the hit. The second time either happens, you are out.</p>
+            <p>Every Runner is racing for the <strong>same final zone</strong>, hidden at a random point inside the target area when the game starts. Each Runner is led to it by their own zones, so two Runners are never shown the same circles - and no Hunter is told where it is, at any point.</p>
           </section>
 
           <section class="help-section">
@@ -57,12 +59,25 @@
             
             <p><strong>How Zones Work:</strong></p>
             <ul>
-              <li>Each Runner has a unique final target location, randomly placed within the play area</li>
-              <li>You'll discover your target through a series of nested zones that get smaller as you progress</li>
-              <li>When a new zone first appears, it starts <strong>locked</strong> for a short time</li>
-              <li>Once unlocked, you can capture it to reveal the next zone</li>
-              <li>Each newly revealed zone will also start locked and you must wait for it to unlock before it can be captured</li>
-              <li>A countdown at the top of the screen shows when the current zone unlocks, plus how many zones remain</li>
+              <li>One final zone is hidden inside the Hunters' target area when the game starts, and every Runner is racing for it</li>
+              <li>You'll close in on it through a series of zones that get smaller as you progress - from 800m down to 140m - each drawn around the final zone</li>
+              <li>They don't line up perfectly: a zone can hang slightly outside the one before it, so the picture you build is close but never exact</li>
+              <li>Your zones are drawn just for you, so another Runner's zones will sit somewhere different even though you are both heading for the same place</li>
+              <li>The game is split into one window per zone. In a 60 minute game that is a zone every 10 minutes: zone 1 from minute 0 to 10, zone 2 from 10 to 20, and the final zone from 50 to 60</li>
+              <li>To capture a zone you must be inside it <strong>with your app open</strong> while its window is running - being there at the wrong time counts for nothing</li>
+              <li>Capture it early and the next zone is revealed straight away, so you can start moving, though it stays <strong>locked</strong> until its own window opens</li>
+              <li>The header shows the zone you are on, a countdown to when it opens or closes, and how long is left in the game</li>
+              <li>The zone circle is green while it can be captured, yellow while it is still locked</li>
+              <li><strong>Miss a window and it costs you a shield</strong> - then everyone moves on to the next zone together</li>
+            </ul>
+
+            <p><strong>Shields:</strong></p>
+            <ul>
+              <li>Every Runner starts the game with one shield - a dog's life</li>
+              <li>The shield is shared between the two ways of going out: missing a zone window and being caught</li>
+              <li>The first of either takes your shield. The second, whichever it is, puts you out and you join the Hunters</li>
+              <li>When a catch takes your shield you cannot be caught again for a few minutes (set by the host), so you have a chance to get clear</li>
+              <li>Everyone can see who still has a shield and who is immune, in the menu player list and beside Runners on the map</li>
             </ul>
 
             <p><strong>Location Pinging:</strong></p>
@@ -71,10 +86,10 @@
               <li>Hunters see a trail of everywhere you've been seen in the last hour, plus an arrow showing which way you're moving - so choose your moments to open the app.</li>
               <li>You can see where other Runners and Hunters have pinged - use this intel wisely!</li>
               <li>If you're already inside a locked zone, stay hidden and wait for it to unlock before opening the app again</li>
-              <li><strong>Warning:</strong> Taking too long to reach your final target gives Hunters more time to catch other Runners, who then join the hunt for you!</li>
+              <li><strong>Warning:</strong> Sitting still to stay hidden is how you miss a zone window - keep one eye on the countdown</li>
             </ul>
 
-            <p><strong>Getting Caught:</strong> If a Hunter takes your photo, report it using the "I've Been Caught" button. You'll become a Hunter and join the pursuit.</p>
+            <p><strong>Getting Caught:</strong> If a Hunter takes your photo, report it using the "I've Been Caught" button. If you still have your shield it takes the hit and you keep running, immune for the next few minutes. If your shield is already gone, you become a Hunter and join the pursuit.</p>
 
             <p><i>Being a successful Runner is about staying hidden and timing your movements carefully. Lay low, watch the map, and move strategically.</i></p>
           </section>
@@ -83,18 +98,27 @@
             <h3>For Hunters</h3>
             <ul>
               <li><strong>Keep your app open at all times</strong></li>
-              <li>View the play area and track Runner locations on your map in real-time</li>
+              <li>View the target area and track Runner locations on your map in real-time</li>
               <li>Follow each Runner's trail from the last hour to predict their movements: solid lines are where they were seen, dotted lines are gaps while their app was closed, and an arrow shows which way they were last heading. Tap a dot to see when they were there. Each Runner has their own colour, shown next to their name in the menu.</li>
               <li>Catch Runners by taking their photo (share it in your group chat as proof!)</li>
-              <li>Work together - caught Runners become Hunters, growing your team</li>
-              <li>The play area center is typically set to your starting location, so Runners are hiding nearby</li>
+              <li>A Runner's first catch only costs them their shield, and they are immune for a few minutes afterwards - the menu player list shows who still has a shield and who is immune, so you know who is worth chasing</li>
+              <li>Runners are also on a clock: every zone window they miss costs them the same single shield</li>
+              <li>Work together - Runners who go out become Hunters, growing your team</li>
+              <li>The target area is the circle you drew at setup: the final zone is hidden somewhere inside it, so that is where everyone ends up. Runners' zones are drawn around the final zone and may reach outside it</li>
+              <li>You are never shown any Runner's zones, or the final zone. Watch where they ping and where they head: they are all converging on the same place</li>
             </ul>
           </section>
 
           <section class="help-section">
             <h3>Winning</h3>
-            <p><strong>Runners Win Individually:</strong> Each Runner who reaches their final target zone is marked as having "won" - multiple Runners can win!</p>
-            <p><strong>Hunters Win Together:</strong> If all Runners are caught before any reach their final target, Hunters win as a team.</p>
+            <p><strong>Runners Win Individually:</strong> Each Runner who captures their final zone during its window is marked as having "won" - multiple Runners can win!</p>
+            <p><strong>Hunters Win Together:</strong> If all Runners are out before any reach their final target, Hunters win as a team.</p>
+            <p><strong>Time:</strong> The game ends when the final zone's window closes. Any Runner who hasn't captured their final target by then has run out of road.</p>
+          </section>
+
+          <section class="help-section">
+            <h3>After the Game</h3>
+            <p>The game over screen shows how everyone finished - who made it home, who was caught, who missed a zone and who ran out of time. <strong>Replay the Map</strong> opens the whole game on one map: every Runner's movements in their own colour, solid where they were seen and dotted where their app was shut, with the final zone revealed at last.</p>
           </section>
 
           <section class="help-section">

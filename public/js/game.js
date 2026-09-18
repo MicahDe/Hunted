@@ -19,9 +19,8 @@ const Game = {
 
   // Timer intervals
   timers: {
-    gameTimer: null,
     locationTimer: null,
-    zoneTimer: null,
+    statusTimer: null,
   },
 
   // Initialize the game
@@ -39,7 +38,7 @@ const Game = {
     };
 
     // Set up map
-    GameMap.initGameMap(initialState.centralLocation.lat, initialState.centralLocation.lng, initialState.playRadius);
+    GameMap.initGameMap(initialState.centralLocation.lat, initialState.centralLocation.lng, initialState.targetRadius);
 
     // Initialize UI
     this.initGameUI();
@@ -68,11 +67,10 @@ const Game = {
     // Update targets on map
     console.log("Updating targets on map for team:", gameState.team);
     GameMap.updateTargets(initialState.targets, gameState.team);
+    GameMap.setShieldStates(initialState.players);
 
-    // Update zone status display for runners
-    if (this.playerInfo && this.playerInfo.team === "runner" && initialState.targets) {
-      this.updateZoneStatusDisplay(initialState.targets);
-    }
+    // Keep the game clock, zone window and shield counting down
+    this.startStatusTicker();
   },
 
   // Initialize game UI
@@ -205,20 +203,16 @@ const Game = {
       GameMap.updateTargets(state.targets, this.playerInfo.team);
     }
 
-    // Update zone status display for runners
-    if (this.playerInfo && this.playerInfo.team === "runner" && state.targets) {
-      this.updateZoneStatusDisplay(state.targets);
+    // Shields are public, so the map labels can show who still has one
+    if (state.players) {
+      GameMap.setShieldStates(state.players);
     }
 
-    // Check for caught runners
-    if (state.players) {
-      // Find runners who have been caught
-      const caughtRunners = state.players.filter((p) => p.team === "runner" && p.status === "caught");
+    this.refreshStatus();
 
-      // Remove their markers from the map
-      caughtRunners.forEach((runner) => {
-        GameMap.removeRunnerMarker(runner.playerId);
-      });
+    // Runners who are out lose their runner marker
+    if (state.players) {
+      state.players.filter((player) => player.status === "caught").forEach((player) => GameMap.removeRunnerMarker(player.playerId));
     }
 
     // If we're in the lobby, also update the lobby player lists
@@ -229,143 +223,161 @@ const Game = {
     }
   },
 
-  // Update zone status display for runners
-  updateZoneStatusDisplay: function (targets) {
-    const zoneStatusElement = document.getElementById("zone-status-value");
-    if (!zoneStatusElement) return;
-
-    const zoneEnclosingElement = document.getElementById("zone-status-container");
-    zoneEnclosingElement.style.display = "block";
-
-    // Find the runner's active targets (filter by player ID and active status)
-    const myTargets = targets.filter((target) => target.playerId === this.playerInfo.playerId && target.status === "active");
-
-    if (myTargets.length === 0) {
-      zoneStatusElement.textContent = "No Zone";
-      zoneStatusElement.classList.remove("zone-active", "zone-inactive", "zone-countdown");
-      this.updateZonesRemainingDisplay(null);
-      return;
+  // Everything in the header runs off the game clock, so one ticker keeps the
+  // countdowns honest between game states
+  startStatusTicker: function () {
+    if (this.timers.statusTimer) {
+      clearInterval(this.timers.statusTimer);
     }
 
-    // Even if somehow there are multiple targets, just use the first one
-    const target = myTargets[0];
+    this.refreshStatus();
+    this.timers.statusTimer = setInterval(() => this.refreshStatus(), 1000);
+  },
 
-    // Update zones remaining display
-    this.updateZonesRemainingDisplay(target);
+  // The runner's zone in play, if they still have one
+  getMyTarget: function () {
+    if (!this.gameState || !this.gameState.targets || !this.playerInfo) return null;
 
-    // Target radius levels: [2000, 1000, 500, 250, 125]
-    const radiusLevels = [2000, 1000, 500, 250, 125];
-    const currentRadiusIndex = radiusLevels.indexOf(target.radiusLevel);
-    const nextZoneNumber = currentRadiusIndex + 2; // Next zone (current is index, so +1 for next, +1 for 1-based)
+    return this.gameState.targets.find((target) => target.playerId === this.playerInfo.playerId && target.status === "active") || null;
+  },
 
-    // If zone is inactive and has an activation time, show countdown with next zone
-    if (target.zoneStatus === "inactive" && target.activationTime) {
-      const now = Date.now();
-      const timeRemaining = Math.max(0, Math.floor((target.activationTime - now) / 1000));
+  // My own player row from the last game state
+  getMyPlayer: function () {
+    if (!this.gameState || !this.gameState.players || !this.playerInfo) return null;
 
-      if (timeRemaining > 0) {
-        // Format the time as MM:SS
-        const minutes = Math.floor(timeRemaining / 60);
-        const seconds = timeRemaining % 60;
-        const formattedTime = `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+    return this.gameState.players.find((player) => player.playerId === this.playerInfo.playerId) || null;
+  },
 
-        // Show next zone with lock icon
-        zoneStatusElement.textContent = `Zone ${nextZoneNumber}: 🔒 ${formattedTime}`;
-        zoneStatusElement.classList.remove("zone-active");
-        zoneStatusElement.classList.add("zone-countdown");
+  // State can arrive before the game screen has been set up, for instance when
+  // the first target lands while the lobby is still showing
+  refreshStatus: function () {
+    if (!this.gameState || !this.playerInfo) return;
 
-        // Start a countdown timer if we don't have one yet
-        if (!this.timers.zoneTimer) {
-          this.startZoneCountdown(target);
-        }
-        return;
-      }
-    }
+    const now = Date.now();
+    const isRunner = this.playerInfo && this.playerInfo.team === "runner";
 
-    // If zone is active or should be active now
-    if (target.zoneStatus === "active" || (target.activationTime && Date.now() > target.activationTime)) {
-      const nextZoneNumber = currentRadiusIndex + 2;  // Next zone (current is index, so +1 for next, +1 for 1-based)
-      zoneStatusElement.textContent = `Zone ${nextZoneNumber}: Unlocked`;
-      zoneStatusElement.classList.remove("zone-inactive", "zone-countdown");
-      zoneStatusElement.classList.add("zone-active");
-    } else {
-      zoneStatusElement.textContent = "Zone: Inactive";
-      zoneStatusElement.classList.remove("zone-active", "zone-countdown");
-      zoneStatusElement.classList.add("zone-inactive");
+    this.updateGameClock(now);
+    this.updateZoneStatusDisplay(now, isRunner);
+    this.updateShieldDisplay(now, isRunner);
+
+    // The menu's immunity countdowns only matter while someone is looking
+    const menu = document.getElementById("game-menu");
+
+    if (menu && menu.classList.contains("open")) {
+      UI.refreshShieldBadges(this.gameState.players);
     }
   },
 
-  // Update zones remaining display for runners
-  updateZonesRemainingDisplay: function (target) {
-    const zonesRemainingElement = document.getElementById("zones-remaining-value");
-    const zonesRemainingContainer = document.getElementById("zones-remaining-container");
-    
-    if (!zonesRemainingElement || !zonesRemainingContainer) return;
+  // How much of the game is left. The last zone window closes on zero.
+  updateGameClock: function (now) {
+    const container = document.getElementById("game-clock-container");
+    const value = document.getElementById("game-clock-value");
+    if (!container || !value) return;
 
+    if (!this.gameState.gameEndTime) {
+      container.style.display = "none";
+      return;
+    }
+
+    const remaining = this.gameState.gameEndTime - now;
+    container.style.display = "block";
+    value.textContent = zoneUtils.formatCountdown(remaining);
+
+    // The last five minutes of the game
+    value.classList.toggle("time-warning", remaining < 5 * 60 * 1000);
+  },
+
+  // The zone in play, and how long is left to capture it (or until it opens)
+  updateZoneStatusDisplay: function (now, isRunner) {
+    const zoneContainer = document.getElementById("zone-status-container");
+    const zoneValue = document.getElementById("zone-status-value");
+    const zonesContainer = document.getElementById("zones-remaining-container");
+    const zonesValue = document.getElementById("zones-remaining-value");
+    if (!zoneContainer || !zoneValue || !zonesContainer || !zonesValue) return;
+
+    const target = isRunner ? this.getMyTarget() : null;
+
+    // Hunters have no zones of their own, and neither has a runner who is out
     if (!target) {
-      zonesRemainingContainer.style.display = "none";
+      zoneContainer.style.display = "none";
+      zonesContainer.style.display = "none";
       return;
     }
 
-    // Show the container
-    zonesRemainingContainer.style.display = "block";
+    zoneContainer.style.display = "block";
+    zonesContainer.style.display = "block";
+    zonesValue.textContent = `Zone ${target.zoneNumber}/${this.gameState.zoneCount}`;
 
-    // Target radius levels: [2000, 1000, 500, 250, 125]
-    const radiusLevels = [2000, 1000, 500, 250, 125];
-    const currentRadiusIndex = radiusLevels.indexOf(target.radiusLevel);
-    
-    if (currentRadiusIndex === -1) {
-      zonesRemainingElement.textContent = "-";
+    const status = zoneUtils.zoneStatusAt(now, { openTime: target.windowOpenTime, closeTime: target.windowCloseTime });
+    zoneValue.classList.remove("zone-open", "zone-locked", "zone-closing", "zone-captured");
+
+    if (status === "locked") {
+      // They captured their last zone, so this one is revealed but not yet open
+      zoneValue.textContent = `🔒 ${zoneUtils.formatCountdown(target.windowOpenTime - now)}`;
+      zoneValue.classList.add("zone-locked");
       return;
     }
 
-    // Current zone number (1-based)
-    const currentZoneNumber = currentRadiusIndex + 1;
-    const totalZones = radiusLevels.length + 1;
+    if (status === "open") {
+      const remaining = target.windowCloseTime - now;
+      zoneValue.textContent = `⏳ ${zoneUtils.formatCountdown(remaining)}`;
 
-    // Show current zone progress
-    zonesRemainingElement.textContent = `Zone ${currentZoneNumber} of ${totalZones}`;
+      // Under a minute left to reach it, with a life riding on it
+      zoneValue.classList.add(remaining < 60 * 1000 ? "zone-closing" : "zone-open");
+      return;
+    }
+
+    zoneValue.textContent = "⏳ missed";
+    zoneValue.classList.add("zone-closing");
   },
 
-  // Start zone countdown timer
-  startZoneCountdown: function (target) {
-    // Clear any existing timer
-    if (this.timers.zoneTimer) {
-      clearInterval(this.timers.zoneTimer);
+  // Your own shield, and the immunity a catch buys you
+  updateShieldDisplay: function (now, isRunner) {
+    const container = document.getElementById("shield-status-container");
+    const value = document.getElementById("shield-status-value");
+    if (!container || !value) return;
+
+    const player = this.getMyPlayer();
+
+    // Nothing to show once you are out of the game or have won it
+    if (!isRunner || !player || player.status === "caught" || player.status === "won") {
+      container.style.display = "none";
+      this.updateCaughtButton(null);
+      return;
     }
 
-    // Calculate next zone number
-    const radiusLevels = [2000, 1000, 500, 250, 125];
-    const currentRadiusIndex = radiusLevels.indexOf(target.radiusLevel);
-    const nextZoneNumber = currentRadiusIndex + 2; // Next zone (current is index, so +1 for next, +1 for 1-based)
+    const shield = zoneUtils.shieldState({ shieldActive: player.shieldActive, immunityUntil: player.immunityUntil }, now);
+    container.style.display = "block";
+    value.classList.remove("shield-held", "shield-immune", "shield-spent");
 
-    // Start a countdown timer
-    this.timers.zoneTimer = setInterval(() => {
-      const zoneStatusElement = document.getElementById("zone-status-value");
-      if (!zoneStatusElement) return;
+    if (shield.immune) {
+      value.textContent = `🛡 ${zoneUtils.formatCountdown(shield.immuneMsRemaining)}`;
+      value.classList.add("shield-immune");
+    } else if (shield.hasShield) {
+      value.textContent = "🛡 Shield";
+      value.classList.add("shield-held");
+    } else {
+      value.textContent = "⚠ Last life";
+      value.classList.add("shield-spent");
+    }
 
-      const now = Date.now();
-      const timeRemaining = Math.max(0, Math.floor((target.activationTime - now) / 1000));
+    this.updateCaughtButton(shield);
+  },
 
-      if (timeRemaining > 0) {
-        // Format the time as MM:SS
-        const minutes = Math.floor(timeRemaining / 60);
-        const seconds = timeRemaining % 60;
-        const formattedTime = `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  // Reporting yourself caught is pointless while you are immune, and the server
+  // turns it down anyway
+  updateCaughtButton: function (shield) {
+    const button = document.getElementById("caught-btn");
+    if (!button) return;
 
-        // Show next zone with lock icon
-        zoneStatusElement.textContent = `Zone ${nextZoneNumber}: 🔒 ${formattedTime}`;
-      } else {
-        // Zone is now active - show the zone that just unlocked
-        zoneStatusElement.textContent = `Zone ${nextZoneNumber}: Unlocked`;
-        zoneStatusElement.classList.remove("zone-inactive", "zone-countdown");
-        zoneStatusElement.classList.add("zone-active");
+    if (shield && shield.immune) {
+      button.disabled = true;
+      button.textContent = `Immune ${zoneUtils.formatCountdown(shield.immuneMsRemaining)}`;
+      return;
+    }
 
-        // Clear the timer
-        clearInterval(this.timers.zoneTimer);
-        this.timers.zoneTimer = null;
-      }
-    }, 1000);
+    button.disabled = false;
+    button.textContent = "I've Been Caught";
   },
 
   // Update team UI
@@ -375,31 +387,23 @@ const Game = {
 
     // If team changed from runner to hunter
     if (team === "hunter" && this.playerInfo.team === "runner") {
-      // Show notification
-      UI.showNotification("You have been caught! You are now a Hunter.", "warning");
-
       // Update player info
       this.playerInfo.team = "hunter";
 
-      // Clear target displays
-      Object.keys(GameMap.targetMarkers).forEach((targetId) => {
-        GameMap.gameMap.removeLayer(GameMap.targetMarkers[targetId]);
-        delete GameMap.targetMarkers[targetId];
-      });
+      // A hunter has no zone or shield of their own left to show
+      this.refreshStatus();
 
-      Object.keys(GameMap.targetCircles).forEach((targetId) => {
-        GameMap.gameMap.removeLayer(GameMap.targetCircles[targetId]);
-        delete GameMap.targetCircles[targetId];
-      });
+      // Hunters are shown no zones, including the one they were just chasing
+      GameMap.updateTargets([], "hunter");
     }
   },
 
   // End the game
   endGame: function (reason) {
     // Clear timers
-    if (this.timers.zoneTimer) {
-      clearInterval(this.timers.zoneTimer);
-      this.timers.zoneTimer = null;
+    if (this.timers.statusTimer) {
+      clearInterval(this.timers.statusTimer);
+      this.timers.statusTimer = null;
     }
 
     if (this.timers.locationTimer) {

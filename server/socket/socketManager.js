@@ -1,12 +1,24 @@
 const { v4: uuidv4 } = require("uuid");
 const geoUtils = require("../../shared/utils/geoUtils");
 const trailUtils = require("../../shared/utils/trailUtils");
+const zoneUtils = require("../../shared/utils/zoneUtils");
 const config = require("../config/default");
 const voiceChatHandler = require("./voiceChatHandler");
 
 module.exports = function (io, db) {
   // Track connected users
   const connectedPlayers = new Map();
+
+  // Zone windows close on the game clock whether or not anyone has their app
+  // open, so the server drives them rather than waiting for the next ping
+  const scheduleTimer = setInterval(() => {
+    processZoneSchedules().catch((error) => console.error("Error processing zone schedules:", error));
+  }, config.game.scheduleTickInterval);
+
+  // Never hold the process open for the tick
+  if (scheduleTimer.unref) {
+    scheduleTimer.unref();
+  }
 
   io.on("connection", (socket) => {
     console.log(`Socket connected: ${socket.id}`);
@@ -17,18 +29,19 @@ module.exports = function (io, db) {
     // Create a room
     socket.on("create_room", async (data) => {
       try {
-        const { roomName, username, team, zoneActivationDelay, playRadius, centralLat, centralLng } = data;
+        const { roomName, username, team, gameDuration, catchImmunity, targetRadius, centralLat, centralLng } = data;
         let roomId;
 
         // Create new room
         roomId = uuidv4();
-        await createRoom(roomId, roomName, data.zoneActivationDelay, data.centralLat, data.centralLng, data.playRadius);
+        const settings = await createRoom(roomId, roomName, { gameDuration, catchImmunity, centralLat, centralLng, targetRadius });
 
         return socket.emit("room_created", {
           roomId,
           roomName,
-          zoneActivationDelay,
-          playRadius,
+          gameDuration: settings.gameDuration,
+          catchImmunity: settings.catchImmunity,
+          targetRadius,
           centralLat,
           centralLng,
         });
@@ -46,6 +59,7 @@ module.exports = function (io, db) {
 
         // Check if room exists
         const room = await getRoom(roomName);
+        let playerTeam = team;
 
         if (room) {
           roomId = room.room_id;
@@ -56,6 +70,10 @@ module.exports = function (io, db) {
           if (player) {
             // Player exists, reconnect
             playerId = player.player_id;
+
+            // A runner who was caught is a hunter now, whatever team their saved
+            // session still thinks they are on
+            playerTeam = player.team;
 
             // Update player status only if they haven't won or been caught
             if (player.status !== "won" && player.status !== "caught") {
@@ -74,7 +92,7 @@ module.exports = function (io, db) {
         socket.join(roomId);
 
         // Track player in connected players
-        connectedPlayers.set(socket.id, { roomId, playerId, username, team });
+        connectedPlayers.set(socket.id, { roomId, playerId, username, team: playerTeam });
 
         // Send initial game state
         const gameState = await getGameState(roomId, playerId);
@@ -84,12 +102,12 @@ module.exports = function (io, db) {
         io.to(roomId).emit("player_joined", {
           playerId: playerId,
           username,
-          team,
+          team: playerTeam,
           timestamp: Date.now(),
         });
 
-        // Broadcast updated game state to all clients in the room
-        io.to(roomId).emit("game_state", gameState);
+        // Bring everyone else's state up to date with their own view of it
+        await broadcastGameState(roomId);
 
         // Return player and room info
         socket.emit("join_success", {
@@ -179,22 +197,29 @@ module.exports = function (io, db) {
           return socket.emit("error", { message: "Player not found" });
         }
 
-        // Update room status to active
-        console.log("Updating room status to active for room:", roomId);
-        await updateRoomStatus(roomId, "active");
+        const room = await getRoomById(roomId);
 
-        // Generate targets for all runners in the room
+        if (!room) {
+          return socket.emit("error", { message: "Room not found" });
+        }
+
+        // Start the game clock and hide the final zone somewhere in the play
+        // area. Both have to be settled before any targets are generated.
+        console.log("Starting the game clock for room:", roomId);
+        await startRoom(room, Date.now());
+
+        // Generate targets for all runners in the room. Runners who haven't
+        // pinged yet still get one - their first zone window is already running.
         const runners = await getTeamPlayers(roomId, "runner");
         console.log(`Found ${runners.length} runners for initial target generation`);
 
         for (const runner of runners) {
-          // Skip runners with no location data
-          if (!runner.last_lat || !runner.last_lng) {
-            continue;
-          }
+          // Everyone starts the game playing, with a full shield
+          await updatePlayerStatus(runner.player_id, "active");
+          await resetShield(runner.player_id);
 
           // Generate a target for this runner
-          const target = await generateTargetForPlayer(roomId, runner.player_id, runner.last_lat, runner.last_lng);
+          const target = await generateTargetForPlayer(roomId, runner.player_id);
 
           if (target) {
             console.log(`Generated initial target for runner ${runner.player_id}`);
@@ -216,15 +241,9 @@ module.exports = function (io, db) {
           }
         }
 
-        // Get updated game state
-        const gameState = await getGameState(roomId);
-        console.log("Game state after starting:", gameState ? "Retrieved successfully" : "Failed to retrieve");
-
-        // Notify all players in room
+        // Notify all players in room, each with their own view of the game
         console.log("Notifying all players in room about game start");
-        io.to(roomId).emit("game_started", {
-          gameState,
-        });
+        await broadcastToPlayers(roomId, "game_started", (gameState) => ({ gameState }));
       } catch (error) {
         console.error("Error starting game:", error);
         socket.emit("error", { message: "Failed to start game" });
@@ -281,46 +300,37 @@ module.exports = function (io, db) {
 
             // Handle different target results
 
-            // Case 1: Player reached a target (smallest radius)
+            // Case 1: Player captured their final zone and won
             if (targetResult.reachedTarget) {
               console.log(`Player ${playerId} reached target ${targetResult.reachedTarget.targetId}`);
 
-              // Notify room of target reached
-              io.to(roomId).emit("target_reached", {
+              // The room hears about it as runner_won; this is the winner's own copy
+              socket.emit("target_reached", {
                 targetId: targetResult.reachedTarget.targetId,
                 location: targetResult.reachedTarget.location,
                 playerId,
                 username: playerData.username,
-                gameState: await getGameState(roomId),
+                gameState: await getGameState(roomId, playerId),
               });
             }
-            // Case 2: Player entered a larger radius, target updated with smaller radius
+            // Case 2: Player captured the zone, so the next one is revealed
             else if (targetResult.updatedTarget) {
-              console.log(`Player ${playerId} entered target radius, updating to smaller radius`);
+              console.log(`Player ${playerId} captured zone ${targetResult.updatedTarget.capturedZoneNumber}, revealing the next one`);
 
-              // Notify just this player about the radius update
-              socket.emit("target_radius_update", {
+              // Notify just this player about the captured zone
+              socket.emit("zone_captured", {
                 targetId: targetResult.updatedTarget.targetId,
                 location: targetResult.updatedTarget.location,
                 radiusLevel: targetResult.updatedTarget.radiusLevel,
+                zoneNumber: targetResult.updatedTarget.zoneNumber,
+                capturedZoneNumber: targetResult.updatedTarget.capturedZoneNumber,
                 zoneStatus: targetResult.updatedTarget.zoneStatus,
-                activationTime: targetResult.updatedTarget.activationTime,
+                windowOpenTime: targetResult.updatedTarget.windowOpenTime,
+                windowCloseTime: targetResult.updatedTarget.windowCloseTime,
                 gameState: await getGameState(roomId, playerId),
               });
             }
-            // Case 3: Zone was activated
-            else if (targetResult.zoneActivated) {
-              console.log(`Zone ${targetResult.zoneActivated.targetId} activated for player ${playerId}`);
-
-              // Notify just this player about the zone activation
-              socket.emit("zone_activated", {
-                targetId: targetResult.zoneActivated.targetId,
-                location: targetResult.zoneActivated.location,
-                radiusLevel: targetResult.zoneActivated.radiusLevel,
-                gameState: await getGameState(roomId, playerId),
-              });
-            }
-            // Case 4: New target was generated for player
+            // Case 3: New target was generated for player
             else if (targetResult.isNew && targetResult.target) {
               console.log(`New target ${targetResult.target.targetId} generated for player ${playerId}`);
 
@@ -329,38 +339,6 @@ module.exports = function (io, db) {
                 target: targetResult.target,
                 gameState: await getGameState(roomId, playerId),
               });
-            }
-          }
-          // If player has no active targets, generate one
-          else if (targetResult === null) {
-            const activeTargets = await new Promise((resolve, reject) => {
-              db.all("SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active'", [roomId, playerId], (err, rows) => {
-                if (err) reject(err);
-                resolve(rows || []);
-              });
-            });
-
-            // If player has no active targets, generate one (but only if they haven't won)
-            if (activeTargets.length === 0) {
-              // Check if player has already won
-              const player = await getPlayerById(playerId);
-              
-              if (player && player.status === "won") {
-                console.log(`Player ${playerId} has already won, not generating new target`);
-              } else {
-                console.log(`Player ${playerId} has no active targets, generating one`);
-                const newTarget = await generateTargetForPlayer(roomId, playerId, lat, lng);
-
-                if (newTarget) {
-                  console.log(`New target ${newTarget.targetId} generated for player ${playerId}`);
-
-                  // Notify just this player about the new target
-                  socket.emit("new_target", {
-                    target: newTarget,
-                    gameState: await getGameState(roomId, playerId),
-                  });
-                }
-              }
             }
           }
         } else if (team === "hunter") {
@@ -375,7 +353,7 @@ module.exports = function (io, db) {
             lastPingTime: now,
             trail: null,
           };
-          
+
           io.to(roomId).emit("runner_location", locationData);
         }
       } catch (error) {
@@ -395,46 +373,35 @@ module.exports = function (io, db) {
         }
 
         const { roomId } = playerInfo;
+        const room = await getRoomById(roomId);
 
-        // Update caught player status
-        await updatePlayerStatus(caughtPlayerId, "caught");
+        if (!room) {
+          return socket.emit("error", { message: "Room not found" });
+        }
 
-        // Change team to hunter
-        await updatePlayerTeam(caughtPlayerId, "hunter");
-
-        // Their open connection should ping as a hunter from now on too
-        connectedPlayers.forEach((info) => {
-          if (info.playerId === caughtPlayerId) {
-            info.team = "hunter";
-          }
-        });
-
-        // Get player info
         const caughtPlayer = await getPlayerById(caughtPlayerId);
 
-        // Notify all players in room
-        io.to(roomId).emit("runner_caught", {
-          caughtPlayerId,
-          username: caughtPlayer.username,
-          timestamp: Date.now(),
-        });
+        if (!caughtPlayer || caughtPlayer.team !== "runner") {
+          return socket.emit("error", { message: "That player is not a runner" });
+        }
 
-        // Check if all runners are caught or have reached their target
-        const activeRunners = await getTeamPlayers(roomId, "runner");
+        // A runner whose shield just took a catch is briefly safe, so the hunter
+        // who caught them can't immediately catch them again
+        const shield = zoneUtils.shieldState({ shieldActive: caughtPlayer.shield_active, immunityUntil: caughtPlayer.immunity_until }, Date.now());
 
-        if (activeRunners.length === 0) {
-          // Game over - all runners have been caught or reached their target
-          await updateRoomStatus(roomId, "completed");
-
-          // Get final game state
-          const gameState = await getGameState(roomId);
-
-          // Notify all players
-          io.to(roomId).emit("game_over", {
-            reason: "All runners have been caught or reached their targets",
-            gameState,
+        if (shield.immune) {
+          return socket.emit("catch_rejected", {
+            playerId: caughtPlayerId,
+            username: caughtPlayer.username,
+            immunityUntil: caughtPlayer.immunity_until,
           });
         }
+
+        // The first catch costs the shield, the second puts them out
+        await applyStrike(roomId, caughtPlayerId, "caught", roomSchedule(room));
+
+        await broadcastGameState(roomId);
+        await checkForGameOver(roomId);
       } catch (error) {
         console.error("Error handling caught player:", error);
       }
@@ -459,6 +426,30 @@ module.exports = function (io, db) {
       }
 
       console.log(`Socket disconnected: ${socket.id}`);
+    });
+
+    // A look back over the game once it is done: where everyone went, how they
+    // finished, and where the final zone was hiding all along
+    socket.on("request_game_review", async (data) => {
+      try {
+        const playerInfo = connectedPlayers.get(socket.id);
+        const roomId = (data && data.roomId) || (playerInfo && playerInfo.roomId);
+
+        if (!roomId) {
+          return socket.emit("error", { message: "Player not found" });
+        }
+
+        const review = await buildGameReview(roomId);
+
+        if (!review) {
+          return socket.emit("error", { message: "There is no game to look back on yet" });
+        }
+
+        socket.emit("game_review", review);
+      } catch (error) {
+        console.error("Error building game review:", error);
+        socket.emit("error", { message: "Failed to load the game review" });
+      }
     });
 
     socket.on("resync_game_state", async (data) => {
@@ -527,17 +518,56 @@ module.exports = function (io, db) {
     });
   }
 
-  async function createRoom(roomId, roomName, zoneActivationDelay, centralLat, centralLng, playRadius) {
+  async function getRoomById(roomId) {
     return new Promise((resolve, reject) => {
+      db.get("SELECT * FROM rooms WHERE room_id = ?", [roomId], (err, row) => {
+        if (err) reject(err);
+        resolve(row);
+      });
+    });
+  }
+
+  async function createRoom(roomId, roomName, settings) {
+    const gameDuration = clamp(settings.gameDuration, 6, 240, config.game.defaultGameDuration);
+    const catchImmunity = clamp(settings.catchImmunity, 0, 30, config.game.defaultCatchImmunity);
+
+    await new Promise((resolve, reject) => {
       db.run(
-        "INSERT INTO rooms (room_id, room_name, zone_activation_delay, central_lat, central_lng, play_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [roomId, roomName, zoneActivationDelay, centralLat, centralLng, playRadius, Date.now(), "lobby"],
+        "INSERT INTO rooms (room_id, room_name, game_duration, catch_immunity, central_lat, central_lng, target_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [roomId, roomName, gameDuration, catchImmunity, settings.centralLat, settings.centralLng, settings.targetRadius, Date.now(), "lobby"],
         function (err) {
           if (err) reject(err);
           resolve(this.lastID);
         },
       );
     });
+
+    return { gameDuration, catchImmunity };
+  }
+
+  // Set the game running, and with it the clock every zone window is measured
+  // from and the one final zone every runner is racing for. The hunters pick
+  // the area, never the zone, and nobody is told where it landed until the game
+  // is over.
+  async function startRoom(room, gameStartTime) {
+    const finalZone = geoUtils.generateRandomPoint(room.central_lat, room.central_lng, room.target_radius || config.game.defaultTargetAreaRadius);
+
+    return new Promise((resolve, reject) => {
+      db.run("UPDATE rooms SET status = 'active', game_start_time = ?, final_lat = ?, final_lng = ?, end_time = NULL WHERE room_id = ?", [gameStartTime, finalZone.lat, finalZone.lng, room.room_id], function (err) {
+        if (err) reject(err);
+        resolve(this.changes);
+      });
+    });
+  }
+
+  function clamp(value, min, max, fallback) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+      return fallback;
+    }
+
+    return Math.min(max, Math.max(min, Math.round(number)));
   }
 
   async function getPlayer(roomId, username) {
@@ -560,7 +590,7 @@ module.exports = function (io, db) {
 
   async function createPlayer(playerId, roomId, username, team) {
     return new Promise((resolve, reject) => {
-      db.run("INSERT INTO players (player_id, room_id, username, team, status, last_ping_time) VALUES (?, ?, ?, ?, ?, ?)", [playerId, roomId, username, team, "active", Date.now()], function (err) {
+      db.run("INSERT INTO players (player_id, room_id, username, team, status, shield_active, last_ping_time) VALUES (?, ?, ?, ?, ?, 1, ?)", [playerId, roomId, username, team, "active", Date.now()], function (err) {
         if (err) reject(err);
         resolve(this.lastID);
       });
@@ -579,6 +609,37 @@ module.exports = function (io, db) {
   async function updatePlayerTeam(playerId, team) {
     return new Promise((resolve, reject) => {
       db.run("UPDATE players SET team = ? WHERE player_id = ?", [team, playerId], function (err) {
+        if (err) reject(err);
+        resolve(this.changes);
+      });
+    });
+  }
+
+  // Everyone goes into the game with a full shield and no leftover immunity
+  async function resetShield(playerId) {
+    return new Promise((resolve, reject) => {
+      db.run("UPDATE players SET shield_active = 1, shield_lost_at = NULL, shield_lost_reason = NULL, immunity_until = NULL, elimination_reason = NULL WHERE player_id = ?", [playerId], function (err) {
+        if (err) reject(err);
+        resolve(this.changes);
+      });
+    });
+  }
+
+  // Spend a runner's one shield. A catch also buys them a spell of immunity;
+  // a missed zone doesn't.
+  async function spendShield(playerId, reason, immunityUntil) {
+    return new Promise((resolve, reject) => {
+      db.run("UPDATE players SET shield_active = 0, shield_lost_at = ?, shield_lost_reason = ?, immunity_until = ? WHERE player_id = ?", [Date.now(), reason, immunityUntil, playerId], function (err) {
+        if (err) reject(err);
+        resolve(this.changes);
+      });
+    });
+  }
+
+  // Out of the game, and onto the hunters' team
+  async function eliminatePlayer(playerId, reason) {
+    return new Promise((resolve, reject) => {
+      db.run("UPDATE players SET status = 'caught', team = 'hunter', elimination_reason = ?, immunity_until = NULL WHERE player_id = ?", [reason, playerId], function (err) {
         if (err) reject(err);
         resolve(this.changes);
       });
@@ -700,17 +761,441 @@ module.exports = function (io, db) {
     });
   }
 
+  // Everything the zone clock needs from a room row
+  function roomSchedule(room) {
+    const radiusLevels = config.game.targetRadiusLevels;
+    const zoneCount = radiusLevels.length;
+    const gameDuration = room.game_duration || config.game.defaultGameDuration;
+    const windowMs = zoneUtils.zoneWindowMs(gameDuration, zoneCount);
+    const catchImmunity = room.catch_immunity == null ? config.game.defaultCatchImmunity : room.catch_immunity;
+
+    // Null until the game is started. A room from before zone windows existed
+    // has no clock either, and is left alone rather than being judged against
+    // windows that were never running.
+    const gameStartTime = room.game_start_time || null;
+
+    return {
+      radiusLevels,
+      zoneOverhang: config.game.zoneOverhang,
+      zoneCount,
+      gameDuration,
+      windowMs,
+      gameStartTime,
+      gameEndTime: gameStartTime ? zoneUtils.gameEndTime(gameStartTime, windowMs, zoneCount) : null,
+      catchImmunity,
+      immunityMs: catchImmunity * 60 * 1000,
+    };
+  }
+
+  // Zone windows run on the game clock, so they have to close on their own: a
+  // runner with their app shut still misses a zone, and a server that was down
+  // over a boundary still catches up on it when it comes back.
+  async function processZoneSchedules() {
+    const rooms = await getActiveRooms();
+
+    for (const room of rooms) {
+      const schedule = roomSchedule(room);
+
+      if (!schedule.gameStartTime) {
+        continue;
+      }
+
+      const runners = await getTeamPlayers(room.room_id, "runner");
+      let changed = false;
+
+      for (const runner of runners) {
+        if (runner.status === "won" || runner.status === "caught") {
+          continue;
+        }
+
+        const advanced = await advanceRunnerZones(room, schedule, runner);
+        changed = changed || advanced;
+      }
+
+      if (Date.now() >= schedule.gameEndTime) {
+        await endGameOnTime(room);
+      } else if (changed) {
+        await broadcastGameState(room.room_id);
+        await checkForGameOver(room.room_id);
+      }
+    }
+  }
+
+  // Walk a runner up to the zone the clock is on, taking a life for every window
+  // that closed with its zone still uncaptured
+  async function advanceRunnerZones(room, schedule, runner) {
+    const target = await getActiveTarget(room.room_id, runner.player_id);
+
+    if (!target) {
+      return false;
+    }
+
+    const clockIndex = zoneUtils.currentZoneIndex(Date.now(), schedule.gameStartTime, schedule.windowMs, schedule.zoneCount);
+    let zoneIndex = target.zone_index || 0;
+    let changed = false;
+
+    while (zoneIndex < clockIndex) {
+      // This zone's window has closed and the runner never pinged inside it
+      const missedZoneNumber = zoneIndex + 1;
+      console.log(`Runner ${runner.player_id} missed zone ${missedZoneNumber}`);
+
+      const strike = await applyStrike(room.room_id, runner.player_id, "missed_zone", schedule, missedZoneNumber);
+      changed = true;
+      zoneIndex += 1;
+
+      if (strike && strike.outcome === "eliminated") {
+        return changed;
+      }
+
+      // The clock has run out, so there is no further zone to move on to
+      if (zoneIndex >= schedule.zoneCount) {
+        break;
+      }
+
+      await moveTargetToZone(target, zoneIndex, schedule);
+
+      emitToPlayer(runner.player_id, "zone_missed", {
+        missedZoneNumber,
+        zoneNumber: zoneIndex + 1,
+        targetId: target.target_id,
+        timestamp: Date.now(),
+      });
+    }
+
+    return changed;
+  }
+
+  // A catch or a missed zone costs a runner their shield - the one dog's life
+  // they share between the two. The second of either puts them out of the game
+  // and onto the hunters' team.
+  async function applyStrike(roomId, playerId, reason, schedule, zoneNumber = null) {
+    const player = await getPlayerById(playerId);
+
+    if (!player || player.team !== "runner" || player.status === "won" || player.status === "caught") {
+      return null;
+    }
+
+    const now = Date.now();
+
+    if (player.shield_active) {
+      // Losing the shield to a catch also buys a spell of immunity, so the
+      // hunter who just caught them can't simply catch them again
+      const immunityUntil = reason === "caught" && schedule.immunityMs > 0 ? now + schedule.immunityMs : null;
+      await spendShield(playerId, reason, immunityUntil);
+
+      io.to(roomId).emit("shield_lost", {
+        playerId,
+        username: player.username,
+        reason,
+        zoneNumber,
+        immunityUntil,
+        timestamp: now,
+      });
+
+      return { outcome: "shield_lost", immunityUntil };
+    }
+
+    await eliminatePlayer(playerId, reason);
+
+    // Their open connection should ping as a hunter from now on too
+    connectedPlayers.forEach((info) => {
+      if (info.playerId === playerId) {
+        info.team = "hunter";
+      }
+    });
+
+    io.to(roomId).emit("runner_caught", {
+      caughtPlayerId: playerId,
+      username: player.username,
+      reason,
+      zoneNumber,
+      timestamp: now,
+    });
+
+    return { outcome: "eliminated" };
+  }
+
+  // Move a runner on to the given zone, locked until that zone's window opens
+  async function moveTargetToZone(target, zoneIndex, schedule) {
+    const window = zoneUtils.zoneWindow(zoneIndex, schedule.gameStartTime, schedule.windowMs);
+    const radiusLevel = schedule.radiusLevels[zoneIndex];
+
+    await new Promise((resolve, reject) => {
+      db.run(
+        "UPDATE targets SET radius_level = ?, zone_index = ?, zone_status = ?, activation_time = ?, window_close_time = ? WHERE target_id = ?",
+        [radiusLevel, zoneIndex, zoneUtils.zoneStatusAt(Date.now(), window), window.openTime, window.closeTime, target.target_id],
+        function (err) {
+          if (err) reject(err);
+          resolve(this.changes);
+        },
+      );
+    });
+
+    // Keep the row we were handed in step with the database
+    target.radius_level = radiusLevel;
+    target.zone_index = zoneIndex;
+    target.activation_time = window.openTime;
+    target.window_close_time = window.closeTime;
+  }
+
+  // The clock has run out on the final zone's window
+  async function endGameOnTime(room) {
+    console.log(`Game clock finished for room ${room.room_id}`);
+    await updateRoomStatus(room.room_id, "completed");
+
+    io.to(room.room_id).emit("game_over", {
+      reason: "Time is up - the final zone has closed",
+      gameState: await getGameState(room.room_id),
+    });
+  }
+
+  // The game is over once every runner is out or has won
+  async function checkForGameOver(roomId) {
+    const runners = await getTeamPlayers(roomId, "runner");
+    const stillRunning = runners.filter((runner) => runner.status !== "won" && runner.status !== "caught");
+
+    if (stillRunning.length > 0) {
+      return false;
+    }
+
+    await updateRoomStatus(roomId, "completed");
+
+    io.to(roomId).emit("game_over", {
+      reason: "All runners have been caught or reached their targets",
+      gameState: await getGameState(roomId),
+    });
+
+    return true;
+  }
+
+  // Each player gets their own view of the state, since a runner's zones are
+  // theirs alone and hunters are shown none at all
+  async function broadcastGameState(roomId) {
+    await broadcastToPlayers(roomId, "game_state", (gameState) => gameState);
+  }
+
+  async function broadcastToPlayers(roomId, event, payloadFor) {
+    const states = new Map();
+
+    for (const [socketId, info] of connectedPlayers.entries()) {
+      if (info.roomId !== roomId) {
+        continue;
+      }
+
+      const playerSocket = io.sockets.sockets.get(socketId);
+
+      if (!playerSocket) {
+        continue;
+      }
+
+      if (!states.has(info.playerId)) {
+        states.set(info.playerId, await getGameState(roomId, info.playerId));
+      }
+
+      playerSocket.emit(event, payloadFor(states.get(info.playerId)));
+    }
+  }
+
+  // Send an event to a player's open connections, if they have any
+  function emitToPlayer(playerId, event, payload) {
+    connectedPlayers.forEach((info, socketId) => {
+      if (info.playerId !== playerId) {
+        return;
+      }
+
+      const playerSocket = io.sockets.sockets.get(socketId);
+
+      if (playerSocket) {
+        playerSocket.emit(event, payload);
+      }
+    });
+  }
+
+  async function getActiveRooms() {
+    return new Promise((resolve, reject) => {
+      db.all("SELECT * FROM rooms WHERE status = 'active'", (err, rows) => {
+        if (err) reject(err);
+        resolve(rows || []);
+      });
+    });
+  }
+
+  // How a player's game went, in one word, for the scoreboard and the replay
+  function playerOutcome(player, room) {
+    if (player.status === "won") {
+      return "won";
+    }
+
+    if (player.status === "caught") {
+      return player.elimination_reason === "missed_zone" ? "missed_zone" : "caught";
+    }
+
+    if (player.team !== "runner") {
+      return "hunter";
+    }
+
+    // Still a runner when the clock ran out: they never made it home
+    return room.status === "completed" ? "out_of_time" : "running";
+  }
+
+  // Everything worth looking back on once the game is over
+  async function buildGameReview(roomId) {
+    const room = await getRoomById(roomId);
+
+    if (!room) {
+      return null;
+    }
+
+    const schedule = roomSchedule(room);
+
+    // Nothing to look back on until the game has actually been played
+    if (!schedule.gameStartTime) {
+      return null;
+    }
+
+    const players = await getRoomPlayers(roomId);
+    const colorIndexes = getRunnerColorIndexes(players);
+    const endTime = room.end_time || Date.now();
+    const trails = {};
+
+    for (const player of players) {
+      // Only players who ran leave a trail behind them
+      if (colorIndexes[player.player_id] === undefined) {
+        continue;
+      }
+
+      const trail = await getReviewTrail(player.player_id, schedule.gameStartTime, endTime);
+
+      if (trail.sightings.length === 0) {
+        continue;
+      }
+
+      trails[player.player_id] = {
+        playerId: player.player_id,
+        username: player.username,
+        colorIndex: colorIndexes[player.player_id],
+        trail,
+      };
+    }
+
+    return {
+      roomName: room.room_name,
+      status: room.status,
+      gameDuration: schedule.gameDuration,
+      gameStartTime: schedule.gameStartTime,
+      endTime,
+      targetArea: {
+        lat: room.central_lat,
+        lng: room.central_lng,
+        radius: room.target_radius || config.game.defaultTargetAreaRadius,
+      },
+
+      // Still a secret if somehow the game is not over yet
+      finalZone: room.status === "completed" ? finalZoneOf(room, schedule) : null,
+      players: players.map((player) => ({
+        playerId: player.player_id,
+        username: player.username,
+        team: player.team,
+        status: player.status,
+        outcome: playerOutcome(player, room),
+        shieldActive: Boolean(player.shield_active),
+        colorIndex: colorIndexes[player.player_id] ?? null,
+        location: player.last_lat != null && player.last_lng != null ? { lat: player.last_lat, lng: player.last_lng } : null,
+        lastPingTime: player.last_ping_time,
+      })),
+      trails,
+    };
+  }
+
+  // A runner's whole game rather than the last hour, and in more detail than
+  // the live map keeps: nobody is chasing anybody any more
+  async function getReviewTrail(playerId, from, to) {
+    const rows = await new Promise((resolve, reject) => {
+      db.all("SELECT lat, lng, timestamp FROM location_history WHERE player_id = ? AND timestamp BETWEEN ? AND ? ORDER BY timestamp ASC", [playerId, from, to], function (err, result) {
+        if (err) reject(err);
+        resolve(result || []);
+      });
+    });
+
+    return trailUtils.buildTrail(rows, to, { ...config.game.trail, ...config.game.trail.review, windowMs: Math.max(1, to - from) });
+  }
+
+  // The one zone every runner in the game is racing for
+  function finalZoneOf(room, schedule) {
+    if (room.final_lat == null || room.final_lng == null) {
+      return null;
+    }
+
+    return {
+      lat: room.final_lat,
+      lng: room.final_lng,
+      radius: schedule.radiusLevels[schedule.zoneCount - 1],
+    };
+  }
+
+  async function getPlayerTargets(roomId, playerId) {
+    return new Promise((resolve, reject) => {
+      db.all("SELECT * FROM targets WHERE room_id = ? AND player_id = ?", [roomId, playerId], (err, rows) => {
+        if (err) reject(err);
+        resolve(rows || []);
+      });
+    });
+  }
+
+  // A runner only ever has one zone in play at a time
+  async function getActiveTarget(roomId, playerId) {
+    return new Promise((resolve, reject) => {
+      db.get("SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active' ORDER BY rowid LIMIT 1", [roomId, playerId], (err, row) => {
+        if (err) reject(err);
+        resolve(row);
+      });
+    });
+  }
+
+  // The window a target's current zone can be captured in
+  function targetWindow(target) {
+    return { openTime: target.activation_time, closeTime: target.window_close_time };
+  }
+
+  // One zone from a runner's chain, as {lat, lng, radius}
+  function targetZone(target, zoneIndex) {
+    try {
+      const zones = JSON.parse(target.zones || "[]");
+      return zones[zoneIndex] || null;
+    } catch (error) {
+      console.error(`Could not read the zone chain of target ${target.target_id}`, error);
+      return null;
+    }
+  }
+
+  // What a runner is told about their hunt: the circle they are on now, and
+  // nothing about where it is closing in on
+  function formatTarget(target) {
+    const window = targetWindow(target);
+    const zoneIndex = target.zone_index || 0;
+    const zone = targetZone(target, zoneIndex);
+
+    return {
+      targetId: target.target_id,
+      playerId: target.player_id,
+      location: zone ? { lat: zone.lat, lng: zone.lng } : null,
+      radiusLevel: target.radius_level,
+      zoneIndex,
+      zoneNumber: zoneIndex + 1,
+      status: target.status,
+      zoneStatus: zoneUtils.zoneStatusAt(Date.now(), window),
+      windowOpenTime: window.openTime,
+      windowCloseTime: window.closeTime,
+      reachedAt: target.reached_at,
+    };
+  }
+
   async function getGameState(roomId, requestingPlayerId = null) {
     try {
       console.log(`Getting game state for room: ${roomId}`);
 
       // Get room details
-      const room = await new Promise((resolve, reject) => {
-        db.get("SELECT * FROM rooms WHERE room_id = ?", [roomId], (err, row) => {
-          if (err) reject(err);
-          resolve(row);
-        });
-      });
+      const room = await getRoomById(roomId);
 
       if (!room) {
         console.error(`Room ${roomId} not found when getting game state`);
@@ -743,50 +1228,27 @@ module.exports = function (io, db) {
         }
       }
 
-      // Get all targets for this room
-      let targets;
-
-      if (requestingPlayerId) {
-        // If a player ID is provided, only get their targets
-        targets = await new Promise((resolve, reject) => {
-          db.all("SELECT * FROM targets WHERE room_id = ? AND player_id = ?", [roomId, requestingPlayerId], (err, rows) => {
-            if (err) reject(err);
-            resolve(rows || []);
-          });
-        });
-      } else {
-        // Get all targets
-        targets = await new Promise((resolve, reject) => {
-          db.all("SELECT * FROM targets WHERE room_id = ?", [roomId], (err, rows) => {
-            if (err) reject(err);
-            resolve(rows || []);
-          });
-        });
-      }
+      // A runner's zones are theirs alone, and hunters are told nothing about
+      // where anybody's zones are: their whole job is to work it out
+      const requestingPlayer = requestingPlayerId ? players.find((player) => player.player_id === requestingPlayerId) : null;
+      const targets = requestingPlayer && requestingPlayer.team === "runner" ? await getPlayerTargets(roomId, requestingPlayerId) : [];
 
       // Format targets for client
-      const formattedTargets = targets.map((target) => ({
-        targetId: target.target_id,
-        playerId: target.player_id,
-        location: {
-          lat: target.lat,
-          lng: target.lng,
-        },
-        radiusLevel: target.radius_level,
-        status: target.status,
-        zoneStatus: target.zone_status || "inactive",
-        activationTime: target.activation_time,
-        reachedBy: target.player_id,
-        reachedAt: target.reached_at,
-      }));
+      const formattedTargets = targets.map(formatTarget);
 
-      // Format players for client
+      // Format players for client. Shields are public: hunters can see who still
+      // has one, and who is briefly immune after spending theirs.
       const formattedPlayers = players.map((player) => ({
         playerId: player.player_id,
         roomId: player.room_id,
         username: player.username,
         team: player.team,
         status: player.status,
+        outcome: playerOutcome(player, room),
+        shieldActive: Boolean(player.shield_active),
+        shieldLostReason: player.shield_lost_reason || null,
+        immunityUntil: player.immunity_until || null,
+        eliminationReason: player.elimination_reason || null,
         location: {
           lat: player.last_lat,
           lng: player.last_lng,
@@ -795,12 +1257,23 @@ module.exports = function (io, db) {
         colorIndex: runnerColorIndexes[player.player_id] ?? null,
       }));
 
+      const schedule = roomSchedule(room);
+
       // Construct game state
       const gameState = {
         roomId: room.room_id,
         roomName: room.room_name,
-        zoneActivationDelay: room.zone_activation_delay,
-        playRadius: room.play_radius,
+        targetRadius: room.target_radius,
+        gameDuration: schedule.gameDuration,
+        catchImmunity: schedule.catchImmunity,
+        zoneCount: schedule.zoneCount,
+        zoneWindowMs: schedule.windowMs,
+        zoneRadiusLevels: schedule.radiusLevels,
+        gameStartTime: schedule.gameStartTime,
+        gameEndTime: schedule.gameEndTime,
+
+        // Where everyone was racing to, kept back until the game is over
+        finalZone: room.status === "completed" ? finalZoneOf(room, schedule) : null,
         centralLocation: {
           lat: room.central_lat,
           lng: room.central_lng,
@@ -819,255 +1292,177 @@ module.exports = function (io, db) {
       return null;
     }
   }
-
+  // Has this runner's ping captured the zone they're on?
+  //
+  // A zone can only be captured inside its own window: being in the right place
+  // at the wrong time counts for nothing. Windows that close with the zone still
+  // uncaptured are handled by the schedule tick, not here.
   async function checkTargetDiscovery(roomId, playerId, lat, lng) {
-    console.log(`Checking target discovery for room ${roomId}, player ${playerId}`);
+    console.log(`Checking zone capture for room ${roomId}, player ${playerId}`);
 
-    // Get player's active targets
-    const targets = await new Promise((resolve, reject) => {
-      db.all("SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status = 'active'", [roomId, playerId], (err, rows) => {
-        if (err) reject(err);
-        resolve(rows || []);
-      });
-    });
+    const room = await getRoomById(roomId);
 
-    console.log(`Found ${targets.length} active targets for player ${playerId}`);
-
-    // If no targets, generate one
-    if (targets.length === 0) {
-      console.log(`No active targets for player ${playerId}, generating new target`);
-      const newTarget = await generateTargetForPlayer(roomId, playerId, lat, lng);
-      if (newTarget) {
-        console.log(`Generated new target for player ${playerId}:`, newTarget);
-        return {
-          isNew: true,
-          target: newTarget,
-        };
-      }
+    if (!room) {
+      console.error(`Room ${roomId} not found when checking zone capture`);
       return null;
     }
 
-    // Check if player is in range of any of their targets
-    for (const target of targets) {
-      // Get all possible radius levels from config
-      const allRadiusLevels = config.game.targetRadiusLevels;
+    const schedule = roomSchedule(room);
 
-      // Check if player is within any of the nested target circles
-      const isInTargetArea = geoUtils.isPlayerInNestedTargetArea(lat, lng, target.lat, target.lng, target.radius_level, allRadiusLevels);
-
-      console.log(`Target ${target.target_id}: isInTargetArea=${isInTargetArea}, current radius=${target.radius_level}m`);
-
-      // Check zone activation status
-      const currentTime = Date.now();
-      const isZoneActive = target.zone_status === "active" || (target.activation_time && currentTime > target.activation_time);
-
-      console.log(`Zone status: ${target.zone_status}, active: ${isZoneActive}`);
-
-      // If zone was inactive but should be active now, update it
-      if (target.zone_status === "inactive" && currentTime > target.activation_time) {
-        await new Promise((resolve, reject) => {
-          db.run("UPDATE targets SET zone_status = 'active' WHERE target_id = ?", [target.target_id], function (err) {
-            if (err) reject(err);
-            resolve(this.changes);
-          });
-        });
-
-        // Return the zone activation event
-        return {
-          zoneActivated: {
-            targetId: target.target_id,
-            location: {
-              lat: target.lat,
-              lng: target.lng,
-            },
-            radiusLevel: target.radius_level,
-          },
-        };
-      }
-
-      // Check if player is within the target's area and zone is active
-      if (isInTargetArea && isZoneActive) {
-        console.log(`Player is in range of target ${target.target_id} (current radius: ${target.radius_level}m)`);
-
-        // If smallest radius (125m), mark as reached
-        if (target.radius_level === config.game.targetRadiusLevels[config.game.targetRadiusLevels.length - 1]) {
-          console.log(`Target reached - smallest radius (${target.radius_level}m)`);
-
-          // Update target as reached
-          await new Promise((resolve, reject) => {
-            db.run("UPDATE targets SET status = 'reached', reached_at = ? WHERE target_id = ?", [Date.now(), target.target_id], function (err) {
-              if (err) reject(err);
-              resolve(this.changes);
-            });
-          });
-
-          // Update player status to indicate they've won
-          await updatePlayerStatus(playerId, "won");
-
-          // Get player info
-          const player = await getPlayerById(playerId);
-
-          // Check if all runners have either been caught or reached their target
-          const activeRunners = await new Promise((resolve, reject) => {
-            db.all("SELECT * FROM players WHERE room_id = ? AND team = 'runner'", [roomId], (err, rows) => {
-              if (err) reject(err);
-              resolve(rows || []);
-            });
-          });
-
-          // If no active runners left, game is over
-          if (activeRunners.length === 0) {
-            // Game over - update room status
-            await updateRoomStatus(roomId, "completed");
-
-            // Get final game state
-            const gameState = await getGameState(roomId);
-
-            // Notify all players of game completion
-            io.to(roomId).emit("game_over", {
-              reason: "All runners have either been caught or reached their targets",
-              gameState,
-            });
-          } else {
-            // Just notify about this runner's victory
-            io.to(roomId).emit("runner_won", {
-              playerId,
-              username: player.username,
-              targetId: target.target_id,
-              timestamp: Date.now(),
-            });
-          }
-
-          // Return the reached target
-          return {
-            reachedTarget: {
-              targetId: target.target_id,
-              location: {
-                lat: target.lat,
-                lng: target.lng,
-              },
-            },
-          };
-        }
-        // If larger radius, create smaller radius target (narrowing the search)
-        else {
-          console.log(`Creating smaller radius target for ${target.target_id}`);
-
-          // Find the current radius level index
-          const currentRadiusIndex = config.game.targetRadiusLevels.indexOf(target.radius_level);
-
-          // If not found (shouldn't happen), use default next radius
-          if (currentRadiusIndex === -1) {
-            console.error(`Invalid radius level ${target.radius_level}`);
-            return null;
-          }
-
-          // Get next smaller radius
-          const newRadiusLevel = config.game.targetRadiusLevels[currentRadiusIndex + 1];
-          console.log(`New radius level: ${newRadiusLevel}m (was ${target.radius_level}m)`);
-
-          // Calculate activation time for the new zone
-          const room = await new Promise((resolve, reject) => {
-            db.get("SELECT * FROM rooms WHERE room_id = ?", [roomId], (err, row) => {
-              if (err) reject(err);
-              resolve(row);
-            });
-          });
-
-          const activationTime = Date.now() + room.zone_activation_delay * 1000;
-
-          // Update target with smaller radius and inactive status
-          await new Promise((resolve, reject) => {
-            db.run("UPDATE targets SET radius_level = ?, zone_status = 'inactive', activation_time = ? WHERE target_id = ?", [newRadiusLevel, activationTime, target.target_id], function (err) {
-              if (err) reject(err);
-              resolve(this.changes);
-            });
-          });
-
-          // Return updated target with new radius
-          return {
-            updatedTarget: {
-              targetId: target.target_id,
-              location: {
-                lat: target.lat,
-                lng: target.lng,
-              },
-              radiusLevel: newRadiusLevel,
-              zoneStatus: "inactive",
-              activationTime: activationTime,
-            },
-          };
-        }
-      }
+    // Zones only mean anything once the game clock is running
+    if (!schedule.gameStartTime) {
+      return null;
     }
 
-    return null;
+    const target = await getActiveTarget(roomId, playerId);
+
+    // No zone in play yet - a runner who joined mid-game, say - so give them
+    // whichever zone the clock is on
+    if (!target) {
+      console.log(`No zone in play for player ${playerId}, generating one`);
+      const newTarget = await generateTargetForPlayer(roomId, playerId);
+
+      return newTarget ? { isNew: true, target: newTarget } : null;
+    }
+
+    const zoneIndex = target.zone_index || 0;
+    const zoneStatus = zoneUtils.zoneStatusAt(Date.now(), targetWindow(target));
+
+    if (zoneStatus !== "open") {
+      console.log(`Zone ${zoneIndex + 1} for player ${playerId} is ${zoneStatus}, nothing to capture`);
+      return null;
+    }
+
+    const zone = targetZone(target, zoneIndex);
+    const isInZone = zone != null && geoUtils.calculateDistance(lat, lng, zone.lat, zone.lng) <= zone.radius;
+    console.log(`Zone ${zoneIndex + 1} (${target.radius_level}m) is open, player inside: ${isInZone}`);
+
+    if (!isInZone) {
+      return null;
+    }
+
+    // The last zone is the runner's final target, so capturing it wins them the game
+    if (zoneIndex >= schedule.zoneCount - 1) {
+      return await reachFinalTarget(roomId, playerId, target);
+    }
+
+    // Capturing a zone reveals the next one straight away so the runner can
+    // start moving, though it stays locked until its own window opens
+    const nextIndex = zoneIndex + 1;
+    await moveTargetToZone(target, nextIndex, schedule);
+
+    const nextWindow = zoneUtils.zoneWindow(nextIndex, schedule.gameStartTime, schedule.windowMs);
+
+    const nextZone = targetZone(target, nextIndex);
+
+    return {
+      updatedTarget: {
+        targetId: target.target_id,
+        location: nextZone ? { lat: nextZone.lat, lng: nextZone.lng } : null,
+        radiusLevel: schedule.radiusLevels[nextIndex],
+        capturedZoneNumber: zoneIndex + 1,
+        zoneNumber: nextIndex + 1,
+        zoneStatus: zoneUtils.zoneStatusAt(Date.now(), nextWindow),
+        windowOpenTime: nextWindow.openTime,
+        windowCloseTime: nextWindow.closeTime,
+      },
+    };
   }
 
-  async function generateTargetForPlayer(roomId, playerId, playerLat, playerLng) {
+  // The runner captured the final zone, which is their target reached and won
+  async function reachFinalTarget(roomId, playerId, target) {
+    console.log(`Player ${playerId} reached their final target ${target.target_id}`);
+
+    await new Promise((resolve, reject) => {
+      db.run("UPDATE targets SET status = 'reached', reached_at = ? WHERE target_id = ?", [Date.now(), target.target_id], function (err) {
+        if (err) reject(err);
+        resolve(this.changes);
+      });
+    });
+
+    await updatePlayerStatus(playerId, "won");
+
+    const player = await getPlayerById(playerId);
+    const gameOver = await checkForGameOver(roomId);
+
+    if (!gameOver) {
+      // Just this runner's victory - the rest are still out there
+      io.to(roomId).emit("runner_won", {
+        playerId,
+        username: player.username,
+        targetId: target.target_id,
+        timestamp: Date.now(),
+      });
+    }
+
+    return {
+      reachedTarget: {
+        targetId: target.target_id,
+        location: {
+          lat: target.lat,
+          lng: target.lng,
+        },
+      },
+    };
+  }
+
+  // Give a runner their hidden final target, revealed to them one zone at a time
+  async function generateTargetForPlayer(roomId, playerId) {
     console.log(`Generating target for player ${playerId} in room ${roomId}`);
 
     // Check if player has already won
     const player = await getPlayerById(playerId);
+
     if (player && player.status === "won") {
       console.log(`Player ${playerId} has already won, not generating new target`);
       return null;
     }
 
-    // Get room info for central location and game boundary
-    const room = await new Promise((resolve, reject) => {
-      db.get("SELECT * FROM rooms WHERE room_id = ?", [roomId], (err, row) => {
-        if (err) reject(err);
-        resolve(row);
-      });
-    });
+    const room = await getRoomById(roomId);
 
     if (!room) {
       console.error(`Room ${roomId} not found when generating target`);
       return null;
     }
 
-    // Check if there are already active targets for this player
-    const existingTargets = await new Promise((resolve, reject) => {
-      db.all("SELECT * FROM targets WHERE room_id = ? AND player_id = ? AND status != 'reached'", [roomId, playerId], (err, rows) => {
-        if (err) reject(err);
-        resolve(rows || []);
-      });
-    });
+    // If the player already has a zone in play, don't generate more
+    const existingTarget = await getActiveTarget(roomId, playerId);
 
-    // If player already has a target, don't generate more
-    if (existingTargets.length > 0) {
+    if (existingTarget) {
       console.log(`Player ${playerId} already has a target`);
-      return existingTargets[0];
+      return formatTarget(existingTarget);
     }
 
-    // Generate a new target position - biased away from player and toward center
-    // if player is near boundary
-    let targetLat, targetLng;
+    const schedule = roomSchedule(room);
 
-    // Maximum play area radius in meters
-    const maxRadius = room.play_radius || config.game.defaultPlayAreaRadius;
+    // Zone windows are measured from the start of the game, so there is nothing
+    // to hand out until it has started
+    if (!schedule.gameStartTime) {
+      console.log(`Room ${roomId} has not started, not generating a target`);
+      return null;
+    }
 
-    // Generate a random position within the play area
-    const angle = Math.random() * 360; // 0-360 degrees
-    const distance = Math.random() * maxRadius; // 0-maxRadius
+    if (room.final_lat == null || room.final_lng == null) {
+      console.error(`Room ${roomId} has no final zone yet`);
+      return null;
+    }
 
-    const targetPos = geoUtils.calculateDestination(room.central_lat, room.central_lng, angle, distance);
+    // Everyone is racing for the same final zone, but by their own route in:
+    // each runner gets their own chain of zones closing in on it
+    const zones = geoUtils.generateZoneChain(room.final_lat, room.final_lng, schedule.radiusLevels, schedule.zoneOverhang);
 
-    targetLat = targetPos.lat;
-    targetLng = targetPos.lng;
-
-    // Create target with initial radius
+    // Start on whatever zone the clock is on, so a runner who joins late isn't
+    // handed a window that closed before they arrived
+    const zoneIndex = Math.min(schedule.zoneCount - 1, zoneUtils.currentZoneIndex(Date.now(), schedule.gameStartTime, schedule.windowMs, schedule.zoneCount));
+    const window = zoneUtils.zoneWindow(zoneIndex, schedule.gameStartTime, schedule.windowMs);
     const targetId = uuidv4();
-    const initialRadius = config.game.targetRadiusLevels[0]; // Largest radius
-    const activationTime = Date.now() + room.zone_activation_delay * 1000; // Convert to milliseconds
 
     await new Promise((resolve, reject) => {
       db.run(
         `INSERT INTO targets 
-        (target_id, room_id, player_id, lat, lng, radius_level, status, zone_status, activation_time)
-        VALUES (?, ?, ?, ?, ?, ?, 'active', 'inactive', ?)`,
-        [targetId, roomId, playerId, targetLat, targetLng, initialRadius, activationTime],
+        (target_id, room_id, player_id, lat, lng, radius_level, zone_index, zones, status, zone_status, activation_time, window_close_time)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+        [targetId, roomId, playerId, room.final_lat, room.final_lng, schedule.radiusLevels[zoneIndex], zoneIndex, JSON.stringify(zones), zoneUtils.zoneStatusAt(Date.now(), window), window.openTime, window.closeTime],
         function (err) {
           if (err) reject(err);
           resolve(this.lastID);
@@ -1075,18 +1470,11 @@ module.exports = function (io, db) {
       );
     });
 
-    console.log(`Created new target ${targetId} for player ${playerId} at ${targetLat}, ${targetLng}`);
+    console.log(`Created new target ${targetId} for player ${playerId} at zone ${zoneIndex + 1}`);
 
-    // Return the created target
-    return {
-      targetId,
-      location: {
-        lat: targetLat,
-        lng: targetLng,
-      },
-      radiusLevel: initialRadius,
-      zoneStatus: "inactive",
-      activationTime: activationTime,
-    };
+    return formatTarget(await getActiveTarget(roomId, playerId));
   }
+
+  // Exposed so tests can drive the zone clock without waiting on the timer
+  return { processZoneSchedules };
 };

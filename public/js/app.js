@@ -35,8 +35,8 @@ function setupAllEventListeners() {
     window.location.href = "help.html";
   });
 
-  // Back buttons
-  document.querySelectorAll(".back-btn").forEach((btn) => {
+  // Back buttons. The replay screen goes back to the game over screen, not home.
+  document.querySelectorAll(".back-btn:not(.replay-back)").forEach((btn) => {
     btn.addEventListener("click", () => {
       UI.showScreen("splash-screen");
     });
@@ -112,13 +112,24 @@ function setupAllEventListeners() {
     GameMap.centerOnPlayer();
   });
 
+  // Spell out the zone windows as the host picks a game length
+  document.getElementById("game-duration").addEventListener("input", () => {
+    UI.updateZoneWindowHint();
+  });
+
   document.getElementById("caught-btn").addEventListener("click", reportSelfCaught);
 
   document.getElementById("leave-game-btn").addEventListener("click", leaveGame);
 
   // Game over screen
+  document.getElementById("replay-map-btn").addEventListener("click", openGameReplay);
   document.getElementById("new-game-btn").addEventListener("click", setupNewGame);
   document.getElementById("return-home-btn").addEventListener("click", returnToHome);
+
+  document.getElementById("replay-back-btn").addEventListener("click", () => {
+    UI.showScreen("game-over-screen");
+    currentScreen = "game-over-screen";
+  });
 
   // Handle geolocation permissions
   if ("geolocation" in navigator) {
@@ -182,9 +193,12 @@ function setupSocketConnection() {
   socket.on("delete_success", handleDeleteSuccess);
   socket.on("game_started", handleGameStarted);
   socket.on("new_target", handleNewTarget);
-  socket.on("target_radius_update", handleTargetRadiusUpdate);
-  socket.on("zone_activated", handleZoneActivated);
+  socket.on("zone_captured", handleZoneCaptured);
+  socket.on("zone_missed", handleZoneMissed);
+  socket.on("shield_lost", handleShieldLost);
+  socket.on("catch_rejected", handleCatchRejected);
   socket.on("runner_won", handleRunnerWon);
+  socket.on("game_review", handleGameReview);
 
   // Voice chat events
   socket.on("voice_transmission_started", handleVoiceTransmissionStarted);
@@ -233,8 +247,9 @@ function checkForExistingSession() {
 function createRoom() {
   const roomName = document.getElementById("room-name").value.trim();
   const username = document.getElementById("creator-username").value.trim();
-  const zoneActivationDelay = parseInt(document.getElementById("zone-activation-delay").value);
-  const playRadius = parseInt(document.getElementById("play-radius").value);
+  const gameDuration = parseInt(document.getElementById("game-duration").value);
+  const catchImmunity = parseInt(document.getElementById("catch-immunity").value);
+  const targetRadius = parseInt(document.getElementById("target-radius").value);
   const teamBtn = document.querySelector("#create-room-form .team-btn.selected");
 
   if (!roomName || !username) {
@@ -271,8 +286,9 @@ function createRoom() {
     roomName,
     username,
     team,
-    zoneActivationDelay,
-    playRadius,
+    gameDuration,
+    catchImmunity,
+    targetRadius,
     centralLat: location.lat,
     centralLng: location.lng,
   });
@@ -375,22 +391,37 @@ function updateLobbyUI(state) {
   }
 
   // Update game settings
-  const zoneDelayElement = document.getElementById("zone-activation-delay-display");
-  if (zoneDelayElement) {
-    zoneDelayElement.textContent = `${state.zoneActivationDelay} sec`;
+  const durationElement = document.getElementById("game-duration-display");
+  if (durationElement && state.gameDuration) {
+    durationElement.textContent = `${state.gameDuration} min`;
   }
 
-  // Update play radius display
-  const playRadiusElement = document.getElementById("play-radius-display");
-  if (playRadiusElement && state.playRadius) {
-    // Convert meters to kilometers for display
-    const radiusInKm = (state.playRadius / 1000).toFixed(1);
-    playRadiusElement.textContent = `${radiusInKm}km radius`;
+  // One zone window per zone, so the last zone is capturable in the final stretch
+  const windowElement = document.getElementById("zone-window-display");
+  if (windowElement && state.zoneCount && state.zoneWindowMs) {
+    windowElement.textContent = `${state.zoneCount} zones, ${Math.round(state.zoneWindowMs / 60000)} min each`;
+  }
+
+  const immunityElement = document.getElementById("catch-immunity-display");
+  if (immunityElement && state.catchImmunity != null) {
+    immunityElement.textContent = state.catchImmunity > 0 ? `${state.catchImmunity} min` : "None";
+  }
+
+  // Where the final zone might be hidden
+  const targetRadiusElement = document.getElementById("target-radius-display");
+  if (targetRadiusElement && state.targetRadius) {
+    targetRadiusElement.textContent = `${state.targetRadius}m radius`;
+  }
+
+  const hunterMessage = document.getElementById("hunter-map-message");
+
+  if (hunterMessage) {
+    hunterMessage.style.display = gameState.team === "hunter" ? "block" : "none";
   }
 
   // Update lobby map only if the player is a hunter
   if (state.centralLocation && gameState.team === "hunter") {
-    GameMap.initLobbyMap(state.centralLocation.lat, state.centralLocation.lng, state.playRadius);
+    GameMap.initLobbyMap(state.centralLocation.lat, state.centralLocation.lng, state.targetRadius);
     // Hide runner message
     const runnerMessage = document.getElementById("runner-map-message");
     if (runnerMessage) {
@@ -522,7 +553,7 @@ function handleRunnerLocation(data) {
 // Handle target reached event
 function handleTargetReached(data) {
   console.log("Target reached:", data);
-  UI.showNotification(`${data.username} reached a target!`, "success");
+  UI.showNotification("You reached your final target. You win!", "success");
   Game.updateGameState(data.gameState);
 }
 
@@ -535,31 +566,60 @@ function handleNewTarget(data) {
   }
 }
 
-// Handle target radius update event
-function handleTargetRadiusUpdate(data) {
-  console.log("Target radius updated:", data);
+// A zone was captured inside its window, revealing the next one
+function handleZoneCaptured(data) {
+  console.log("Zone captured:", data);
 
-  // Display the points earned notification if points were earned
-  if (data.pointsValue && data.earnedPoints) {
-    UI.showNotification(`You earned ${data.earnedPoints} points! Target is getting smaller!`, "success");
+  const opensIn = zoneUtils.formatCountdown(data.windowOpenTime - Date.now());
+  UI.showNotification(`Zone ${data.capturedZoneNumber} captured! Zone ${data.zoneNumber} opens in ${opensIn}.`, "success");
+
+  Game.updateGameState(data.gameState);
+}
+
+// A zone's window closed before this runner reached it. What it cost them
+// arrives separately as shield_lost or runner_caught.
+function handleZoneMissed(data) {
+  console.log("Zone missed:", data);
+  UI.showNotification(`Zone ${data.missedZoneNumber} closed. Zone ${data.zoneNumber} is open now.`, "warning");
+}
+
+// Shields are public, so everyone hears when one is spent
+function handleShieldLost(data) {
+  console.log("Shield lost:", data);
+
+  const cause = data.reason === "missed_zone" ? `missing zone ${data.zoneNumber}` : "being caught";
+
+  if (data.playerId === gameState.playerId) {
+    const immuneFor = data.immunityUntil ? ` You are immune for ${zoneUtils.formatCountdown(data.immunityUntil - Date.now())}.` : "";
+    UI.showNotification(`Your shield took the hit for ${cause}. One more and you are out.${immuneFor}`, "warning");
   } else {
-    UI.showNotification("Zone captured! New zone has been revealed...", "info");
+    UI.showNotification(`${data.username} lost their shield (${cause}).`, "info");
   }
 
-  // Update game state
-  Game.updateGameState(data.gameState);
+  socket.emit("resync_game_state", { roomId: gameState.roomId });
+}
+
+// The server turned down a catch because that runner is still immune
+function handleCatchRejected(data) {
+  console.log("Catch rejected:", data);
+  UI.showNotification(`${data.username} is immune for another ${zoneUtils.formatCountdown(data.immunityUntil - Date.now())}.`, "warning");
 }
 
 function handleRunnerCaught(data) {
   console.log("Runner caught:", data);
-  UI.showNotification(`${data.username} has been caught!`, "warning");
 
-  // Check if we're the caught player
-  if (data.caughtPlayerId === gameState.playerId) {
+  const isMe = data.caughtPlayerId === gameState.playerId;
+  const missedZone = data.reason === "missed_zone";
+
+  if (isMe) {
+    UI.showNotification(missedZone ? `You missed zone ${data.zoneNumber} with no shield left. You are a Hunter now.` : "You have been caught! You are now a Hunter.", "warning");
+
     // Change our team to hunter
     gameState.team = "hunter";
     saveGameSession();
     Game.updateTeamUI("hunter");
+  } else {
+    UI.showNotification(missedZone ? `${data.username} missed zone ${data.zoneNumber} and is out!` : `${data.username} has been caught!`, "warning");
   }
 
   socket.emit("resync_game_state", { roomId: gameState.roomId });
@@ -571,65 +631,120 @@ function handleGameOver(data) {
   updateGameOverUI(data);
 }
 
+// The order players are listed in after the game: home first, then those still
+// out there when the clock stopped, then everyone who went out, then hunters
+const OUTCOME_ORDER = ["won", "out_of_time", "running", "caught", "missed_zone", "hunter"];
+
 function updateGameOverUI(data) {
   const state = data.gameState;
+  if (!state) return;
 
-  // Set game stats
-  document.getElementById("final-duration").textContent = `${state.gameDuration} min`;
+  const players = state.players || [];
+  const home = players.filter((player) => player.outcome === "won");
+  const out = players.filter((player) => player.outcome === "caught" || player.outcome === "missed_zone");
 
-  // Count reached targets
-  const targetsReached = state.targets.filter((t) => t.reachedBy).length;
-  document.getElementById("targets-reached").textContent = targetsReached;
-
-  // Count caught runners
-  const runnersCaught = state.players.filter((p) => p.team === "runner" && p.status === "caught").length;
-  document.getElementById("runners-caught").textContent = runnersCaught;
-
-  // Populate all player scores
-  const allPlayerScoresList = document.getElementById("all-player-scores-list");
-  if (allPlayerScoresList) {
-    allPlayerScoresList.innerHTML = "";
-
-    // Sort all players by score (highest first)
-    const allPlayers = [...state.players].sort((a, b) => (b.score || 0) - (a.score || 0));
-
-    if (allPlayers.length === 0) {
-      // No players in the game (shouldn't happen)
-      const noPlayers = document.createElement("div");
-      noPlayers.textContent = "No players in this game";
-      allPlayerScoresList.appendChild(noPlayers);
-    } else {
-      // Add each player's score
-      allPlayers.forEach((player) => {
-        const scoreItem = document.createElement("div");
-        scoreItem.className = `player-score-item ${player.team}`;
-
-        // Left side: player name and team
-        const playerInfo = document.createElement("div");
-        playerInfo.className = "player-info";
-
-        const playerName = document.createElement("span");
-        playerName.className = "player-name";
-        playerName.textContent = player.username;
-
-        const playerTeam = document.createElement("span");
-        playerTeam.className = "player-team";
-        playerTeam.textContent = `(${player.team})`;
-
-        playerInfo.appendChild(playerName);
-        playerInfo.appendChild(playerTeam);
-
-        // Right side: player score
-        const playerScore = document.createElement("span");
-        playerScore.className = "player-score";
-        playerScore.textContent = player.score || 0;
-
-        scoreItem.appendChild(playerInfo);
-        scoreItem.appendChild(playerScore);
-        allPlayerScoresList.appendChild(scoreItem);
-      });
-    }
+  // Who won, said plainly
+  const headline = document.getElementById("game-over-headline");
+  if (headline) {
+    headline.textContent = home.length > 0 ? `${home.length === 1 ? `${home[0].username} made it home` : `${home.length} Runners made it home`}` : "The Hunters took the lot";
   }
+
+  document.getElementById("final-duration").textContent = `${state.gameDuration} min`;
+  document.getElementById("runners-home").textContent = home.length;
+  document.getElementById("runners-out").textContent = out.length;
+
+  // How everyone finished
+  const list = document.getElementById("player-outcome-list");
+  if (!list) return;
+
+  list.innerHTML = "";
+
+  if (players.length === 0) {
+    const empty = document.createElement("div");
+    empty.textContent = "No players in this game";
+    list.appendChild(empty);
+    return;
+  }
+
+  [...players]
+    .sort((a, b) => OUTCOME_ORDER.indexOf(a.outcome) - OUTCOME_ORDER.indexOf(b.outcome) || a.username.localeCompare(b.username))
+    .forEach((player) => {
+      const outcome = UI.outcomeLabel(player.outcome);
+
+      const row = document.createElement("div");
+      row.className = `player-outcome-item ${outcome.state}`;
+
+      const name = document.createElement("span");
+      name.className = "player-name";
+
+      // Runners keep the colour their trail had, so the replay map reads across
+      if (player.colorIndex != null) {
+        const swatch = document.createElement("span");
+        swatch.className = "player-color";
+        swatch.style.setProperty("--runner-color", GameMap.runnerColor(player.colorIndex));
+        name.appendChild(swatch);
+      }
+
+      name.appendChild(document.createTextNode(player.username));
+
+      const result = document.createElement("span");
+      result.className = "player-outcome";
+      result.textContent = outcome.text;
+
+      // A runner who came home with their shield intact deserves the credit
+      if (player.outcome === "won" && player.shieldActive) {
+        result.textContent = `${outcome.text}, shield intact`;
+      }
+
+      row.append(name, result);
+      list.appendChild(row);
+    });
+}
+
+// Look back over the game: everyone's trails, and the final zone revealed
+function openGameReplay() {
+  if (!gameState.roomId) {
+    return UI.showNotification("There is no game to look back on", "warning");
+  }
+
+  UI.showLoading("Loading the game...");
+  socket.emit("request_game_review", { roomId: gameState.roomId });
+}
+
+function handleGameReview(review) {
+  console.log("Game review:", review);
+  UI.hideLoading();
+  UI.showScreen("replay-screen");
+  currentScreen = "replay-screen";
+
+  GameMap.renderReview(review);
+  updateReplayLegend(review);
+}
+
+function updateReplayLegend(review) {
+  const legend = document.getElementById("replay-legend");
+  if (!legend) return;
+
+  legend.innerHTML = "";
+
+  // Only the runners left a trail worth a legend entry
+  (review.players || [])
+    .filter((player) => player.colorIndex != null)
+    .sort((a, b) => a.colorIndex - b.colorIndex)
+    .forEach((player) => {
+      const outcome = UI.outcomeLabel(player.outcome);
+
+      const row = document.createElement("span");
+      row.className = `replay-legend-item ${outcome.state}`;
+
+      const swatch = document.createElement("span");
+      swatch.className = "player-color";
+      swatch.style.setProperty("--runner-color", GameMap.runnerColor(player.colorIndex));
+
+      row.appendChild(swatch);
+      row.appendChild(document.createTextNode(`${player.username} - ${outcome.text}`));
+      legend.appendChild(row);
+    });
 }
 
 function startGame() {
@@ -792,21 +907,15 @@ function returnToActiveGame() {
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
 
-// Handle zone activated event
-function handleZoneActivated(data) {
-  console.log("Zone activated:", data);
-  UI.showNotification("A zone has been activated! You can now capture it.", "success");
-
-  // Update game state with the latest data
-  Game.updateGameState(data.gameState);
-}
-
 // Handle runner won event
 function handleRunnerWon(data) {
   console.log("Runner won:", data);
-  UI.showNotification(`${data.username} has reached their target and won!`, "success");
 
-  // Request updated game state
+  // The winner already heard about it as target_reached
+  if (data.playerId !== gameState.playerId) {
+    UI.showNotification(`${data.username} has reached their target and won!`, "success");
+  }
+
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
 

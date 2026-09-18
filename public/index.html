@@ -56,7 +56,7 @@
           <button id="join-room-btn" class="secondary-btn">Join Room</button>
           <button id="help-btn" class="secondary-btn">How to Play</button>
         </div>
-        <div class="app-version">v1.0.7</div>
+        <div class="app-version">v1.1.0</div>
       </div>
 
       <!-- Create Room Screen -->
@@ -99,37 +99,55 @@
               </div>
             </div>
             <div class="form-group">
-              <label for="zone-activation-delay">Zone Activation Delay (seconds)</label>
+              <label for="game-duration">Game Duration (minutes)</label>
               <input
                 type="number"
-                id="zone-activation-delay"
-                min="1"
-                max="600"
-                value="180"
+                id="game-duration"
+                min="6"
+                max="240"
+                step="6"
+                value="60"
                 required
               />
+              <div class="location-info">
+                <span id="zone-window-hint">Split evenly into one window per zone</span>
+              </div>
             </div>
             <div class="form-group">
-              <label>Runner Target Location</label>
+              <label for="catch-immunity">Shield Immunity (minutes)</label>
+              <input
+                type="number"
+                id="catch-immunity"
+                min="0"
+                max="30"
+                value="3"
+                required
+              />
+              <div class="location-info">
+                <span>How long a Runner cannot be caught again after a catch takes their shield</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Target Area</label>
               <div id="setup-map" class="setup-map"></div>
               <div class="location-info">
-                <span>Tap map to set center of target area</span>
+                <span>Tap the map to set the middle of the target area. When the game starts, the final zone every Runner is racing for is hidden at a random point inside it - not even you will be told where.</span>
                 <div id="selected-location"></div>
               </div>
             </div>
             <div class="form-group">
-              <label for="play-radius">Runner Target Radius (meters)</label>
+              <label for="target-radius">Target Area Radius (meters)</label>
               <input
                 type="number"
-                id="play-radius"
+                id="target-radius"
                 min="100"
                 max="5000"
-                step="100"
-                value="1000"
+                step="50"
+                value="400"
                 required
               />
               <div class="location-info">
-                <span>The radius within the Runner Target Location that Runner targets will be generated</span>
+                <span>How far from the middle the final zone might be hidden. This is the only thing it decides - it does not bound the zones, the Runners, or how far the game ranges.</span>
               </div>
             </div>
             <button type="submit" class="primary-btn">Create Room</button>
@@ -215,20 +233,39 @@
             <h3>Game Settings</h3>
             <div class="game-settings">
               <div class="setting-item">
-                <span class="setting-label">Zone Activation Delay:</span>
-                <span id="zone-activation-delay-display">60 sec</span>
+                <span class="setting-label">Game Duration:</span>
+                <span id="game-duration-display">60 min</span>
               </div>
               <div class="setting-item">
-                <span class="setting-label">Play Area:</span>
-                <span id="play-radius-display">5km radius</span>
+                <span class="setting-label">Zone Windows:</span>
+                <span id="zone-window-display">6 zones, 10 min each</span>
+              </div>
+              <div class="setting-item">
+                <span class="setting-label">Shield Immunity:</span>
+                <span id="catch-immunity-display">3 min</span>
+              </div>
+              <div class="setting-item">
+                <span class="setting-label">Target Area:</span>
+                <span id="target-radius-display">500m radius</span>
               </div>
             </div>
           </div>
           <div class="lobby-section">
-            <h3>Game Location</h3>
+            <h3>Shields</h3>
+            <p class="lobby-note">
+              Every Runner starts with one shield - a dog's life. Miss a zone's window or get caught
+              and it takes the hit; the second time either happens, you are out and join the Hunters.
+              A shield spent on a catch also makes you immune to being caught again for a few minutes.
+            </p>
+          </div>
+          <div class="lobby-section">
+            <h3>Target Area</h3>
             <div id="lobby-map" class="lobby-map"></div>
             <div id="runner-map-message" class="location-info" style="display: none;">
-              <span>Map is only visible to hunters. As a runner, your goal is to navigate to increasingly smaller zones that will be revealed during the game.</span>
+              <span>Map is only visible to Hunters. As a Runner, your goal is to navigate to increasingly smaller zones that will be revealed during the game.</span>
+            </div>
+            <div id="hunter-map-message" class="location-info">
+              <span>The final zone is hidden somewhere in this circle, the same one for every Runner. Each of them closes in on it through their own zones, and you are never told where it is.</span>
             </div>
           </div>
           <div class="lobby-controls">
@@ -249,6 +286,11 @@
       <div id="game-screen" class="screen">
         <div class="game-header">
           <div class="game-status">
+            <div class="status-clock status-item" id="game-clock-container" style="display: none;">
+              <div id="game-clock" class="time-indicator">
+                <span id="game-clock-value">--:--</span>
+              </div>
+            </div>
             <div class="status-zones status-item" id="zones-remaining-container" style="display: none;">
               <div id="zones-remaining" class="zones-indicator">
                 <span id="zones-remaining-value">-</span>
@@ -257,6 +299,11 @@
             <div class="status-time status-item" id="zone-status-container" style="display: none;">
               <div id="zone-status" class="time-indicator">
                 <span id="zone-status-value">No Zone</span>
+              </div>
+            </div>
+            <div class="status-shield status-item" id="shield-status-container" style="display: none;">
+              <div id="shield-status" class="time-indicator">
+                <span id="shield-status-value">Shield</span>
               </div>
             </div>
           </div>
@@ -367,34 +414,47 @@
         </div>
         <div class="screen-content">
           <div class="game-stats">
-            <h3>Game Stats</h3>
+            <h3 id="game-over-headline">Game Stats</h3>
             <div class="stats-grid">
               <div class="stat-item">
                 <span class="stat-label">Duration:</span>
                 <span id="final-duration">60 min</span>
               </div>
               <div class="stat-item">
-                <span class="stat-label">Targets Reached:</span>
-                <span id="targets-reached">0</span>
+                <span class="stat-label">Made it home:</span>
+                <span id="runners-home">0</span>
               </div>
               <div class="stat-item">
-                <span class="stat-label">Runners Caught:</span>
-                <span id="runners-caught">0</span>
+                <span class="stat-label">Runners out:</span>
+                <span id="runners-out">0</span>
               </div>
             </div>
           </div>
-          <div class="player-scores">
-            <h3>Player Scores</h3>
-            <div id="all-player-scores-list" class="player-scores-list">
-              <!-- All player scores will be populated here -->
+          <div class="player-outcomes">
+            <h3>How everyone finished</h3>
+            <div id="player-outcome-list" class="player-outcome-list">
+              <!-- Each player's outcome is populated here -->
             </div>
           </div>
           <div class="game-over-controls">
+            <button id="replay-map-btn" class="primary-btn">Replay the Map</button>
             <button id="new-game-btn" class="primary-btn">New Game</button>
             <button id="return-home-btn" class="secondary-btn">
               Return to Home
             </button>
           </div>
+        </div>
+      </div>
+
+      <!-- Game Replay: where everyone went, and where the final zone was -->
+      <div id="replay-screen" class="screen">
+        <div class="screen-header">
+          <button id="replay-back-btn" class="back-btn replay-back">&larr;</button>
+          <h2>Game Replay</h2>
+        </div>
+        <div id="replay-map" class="replay-map"></div>
+        <div id="replay-legend" class="replay-legend">
+          <!-- One row per runner, with their colour and how they finished -->
         </div>
       </div>
 
@@ -418,6 +478,7 @@
 
     <!-- Internal Scripts -->
     <script src="../shared/utils/geoUtils.js"></script>
+    <script src="../shared/utils/zoneUtils.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/map.js"></script>
     <script src="js/audioDsp.js"></script>
