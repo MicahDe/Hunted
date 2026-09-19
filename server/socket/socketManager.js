@@ -96,6 +96,8 @@ module.exports = function (io, db) {
             gameDuration: data.gameDuration,
             catchImmunity: data.catchImmunity,
             zoneLock: data.zoneLock,
+            shieldZones: data.shieldZones,
+            invisibility: data.invisibility,
             centralLat,
             centralLng,
             targetRadius: data.targetRadius,
@@ -602,8 +604,11 @@ module.exports = function (io, db) {
       return socket.emit("error", { message: "That game has already finished." });
     }
 
+    // Joining a game under way gets a shield only if everyone else still has
+    // theirs. In the lobby it makes no odds: the game hands them out at the start.
     const playerId = uuidv4();
-    await createPlayer(playerId, roomId, username, team);
+    const hasShield = room.status !== "active" || shieldAvailable(roomSchedule(room), Date.now());
+    await createPlayer(playerId, roomId, username, team, hasShield);
 
     // A room from before hosts were tracked gets its first player as host
     if (!room.host_player_id) {
@@ -716,12 +721,15 @@ module.exports = function (io, db) {
     console.log("Starting the game clock for room:", room.room_id);
     await startRoom(room, Date.now());
 
+    // Everyone starts the game with a shield - unless the host set up a game
+    // without them
+    const hasShield = roomSchedule(room).shieldZones > 0;
+
     // Every runner gets their first zone now, whether or not their app is open:
     // their first zone window is already running
     for (const runner of runners) {
-      // Everyone starts the game playing, with a full shield
       await updatePlayerStatus(runner.player_id, "active");
-      await resetShield(runner.player_id);
+      await resetShield(runner.player_id, hasShield);
       await generateTargetForPlayer(room.room_id, runner.player_id);
     }
 
@@ -758,10 +766,9 @@ module.exports = function (io, db) {
 
     const now = Date.now();
 
-    // Update player location in database
-    await updatePlayerLocation(playerId, lat, lng);
-
     if (team === "hunter") {
+      await updatePlayerLocation(playerId, lat, lng);
+
       io.to(roomId).emit("runner_location", {
         playerId,
         username,
@@ -776,15 +783,25 @@ module.exports = function (io, db) {
     // Runners leave a trail, and might just have captured their zone
     await storeLocationHistory(playerId, roomId, lat, lng);
 
-    io.to(roomId).emit("runner_location", {
-      playerId,
-      username,
-      team: "runner",
-      location: { lat, lng },
-      lastPingTime: now,
-      colorIndex: getRunnerColorIndexes(await getRoomPlayers(roomId))[playerId],
-      trail: await getRunnerTrail(playerId, { lat, lng, timestamp: now }),
-    });
+    // A runner who kept their shield until it ran out is invisible for a spell
+    // afterwards. Their pings still capture zones and still go in the history
+    // for the end of game replay, but the location everyone else is shown stays
+    // where they were last seen before it began.
+    const schedule = roomSchedule(room);
+
+    if (!isInvisible(player, schedule, now)) {
+      await updatePlayerLocation(playerId, lat, lng);
+
+      io.to(roomId).emit("runner_location", {
+        playerId,
+        username,
+        team: "runner",
+        location: { lat, lng },
+        lastPingTime: now,
+        colorIndex: getRunnerColorIndexes(await getRoomPlayers(roomId))[playerId],
+        trail: await getRunnerTrail(playerId, { lat, lng, timestamp: now }, hiddenPeriods(player, schedule)),
+      });
+    }
 
     const targetResult = await checkTargetDiscovery(roomId, playerId, lat, lng);
 
@@ -975,12 +992,14 @@ module.exports = function (io, db) {
     const gameDuration = clamp(settings.gameDuration, 6, 240, config.game.defaultGameDuration);
     const catchImmunity = clamp(settings.catchImmunity, 0, 30, config.game.defaultCatchImmunity);
     const zoneLock = clamp(settings.zoneLock, 0, 30, config.game.defaultZoneLock);
+    const shieldZones = clamp(settings.shieldZones, 0, config.game.targetRadiusLevels.length, config.game.defaultShieldZones);
+    const invisibility = clamp(settings.invisibility, 0, 30, config.game.defaultInvisibility);
     const targetRadius = clamp(settings.targetRadius, 100, 5000, config.game.defaultTargetAreaRadius);
 
     await new Promise((resolve, reject) => {
       db.run(
-        "INSERT INTO rooms (room_id, room_name, host_player_id, game_duration, catch_immunity, zone_lock, central_lat, central_lng, target_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [roomId, roomName, hostPlayerId, gameDuration, catchImmunity, zoneLock, settings.centralLat, settings.centralLng, targetRadius, Date.now(), "lobby"],
+        "INSERT INTO rooms (room_id, room_name, host_player_id, game_duration, catch_immunity, zone_lock, shield_zones, invisibility, central_lat, central_lng, target_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [roomId, roomName, hostPlayerId, gameDuration, catchImmunity, zoneLock, shieldZones, invisibility, settings.centralLat, settings.centralLng, targetRadius, Date.now(), "lobby"],
         function (err) {
           if (err) reject(err);
           resolve(this.lastID);
@@ -988,7 +1007,7 @@ module.exports = function (io, db) {
       );
     });
 
-    return { gameDuration, catchImmunity, zoneLock };
+    return { gameDuration, catchImmunity, zoneLock, shieldZones, invisibility };
   }
 
   // Set the game running, and with it the clock every zone window is measured
@@ -1035,9 +1054,9 @@ module.exports = function (io, db) {
     });
   }
 
-  async function createPlayer(playerId, roomId, username, team) {
+  async function createPlayer(playerId, roomId, username, team, hasShield = true) {
     return new Promise((resolve, reject) => {
-      db.run("INSERT INTO players (player_id, room_id, username, team, status, shield_active, last_ping_time) VALUES (?, ?, ?, ?, ?, 1, ?)", [playerId, roomId, username, team, "active", Date.now()], function (err) {
+      db.run("INSERT INTO players (player_id, room_id, username, team, status, shield_active, last_ping_time) VALUES (?, ?, ?, ?, ?, ?, ?)", [playerId, roomId, username, team, "active", hasShield ? 1 : 0, Date.now()], function (err) {
         if (err) reject(err);
         resolve(this.lastID);
       });
@@ -1062,18 +1081,19 @@ module.exports = function (io, db) {
     });
   }
 
-  // Everyone goes into the game with a full shield and no leftover immunity
-  async function resetShield(playerId) {
+  // Everyone goes into the game with a fresh shield (if the game has them) and
+  // no leftover immunity
+  async function resetShield(playerId, hasShield) {
     return new Promise((resolve, reject) => {
-      db.run("UPDATE players SET shield_active = 1, shield_lost_at = NULL, shield_lost_reason = NULL, immunity_until = NULL, elimination_reason = NULL WHERE player_id = ?", [playerId], function (err) {
+      db.run("UPDATE players SET shield_active = ?, shield_lost_at = NULL, shield_lost_reason = NULL, immunity_until = NULL, elimination_reason = NULL WHERE player_id = ?", [hasShield ? 1 : 0, playerId], function (err) {
         if (err) reject(err);
         resolve(this.changes);
       });
     });
   }
 
-  // Spend a runner's one shield. A catch also buys them a spell of immunity;
-  // a missed zone doesn't.
+  // Take a runner's one shield: spent on a catch, which also buys them a
+  // spell of immunity, or run out along with everybody else's
   async function spendShield(playerId, reason, immunityUntil) {
     return new Promise((resolve, reject) => {
       db.run("UPDATE players SET shield_active = 0, shield_lost_at = ?, shield_lost_reason = ?, immunity_until = ? WHERE player_id = ?", [Date.now(), reason, immunityUntil, playerId], function (err) {
@@ -1140,7 +1160,8 @@ module.exports = function (io, db) {
 
   // Get a runner's trail (sightings and heading) over the configured window.
   // latestPing is their most recent location, which history may have skipped as too close to the last point.
-  async function getRunnerTrail(playerId, latestPing) {
+  // Nothing from inside hidden (see hiddenPeriods) is included.
+  async function getRunnerTrail(playerId, latestPing, hidden = []) {
     const now = Date.now();
     const since = now - config.game.trail.windowMs;
 
@@ -1157,7 +1178,7 @@ module.exports = function (io, db) {
       rows.push(latestPing);
     }
 
-    return trailUtils.buildTrail(rows, now, config.game.trail);
+    return trailUtils.buildTrail(rows, now, config.game.trail, hidden);
   }
 
   // All players in a room, in the order they joined
@@ -1216,6 +1237,8 @@ module.exports = function (io, db) {
     const windowMs = zoneUtils.zoneWindowMs(gameDuration, zoneCount);
     const lockMs = zoneUtils.zoneLockMs(room.zone_lock == null ? config.game.defaultZoneLock : room.zone_lock, windowMs);
     const catchImmunity = room.catch_immunity == null ? config.game.defaultCatchImmunity : room.catch_immunity;
+    const shieldZones = Math.min(zoneCount, room.shield_zones == null ? config.game.defaultShieldZones : room.shield_zones);
+    const invisibility = room.invisibility == null ? config.game.defaultInvisibility : room.invisibility;
 
     // Null until the game is started. A room from before zone windows existed
     // has no clock either, and is left alone rather than being judged against
@@ -1233,7 +1256,53 @@ module.exports = function (io, db) {
       gameEndTime: gameStartTime ? zoneUtils.gameEndTime(gameStartTime, windowMs, zoneCount) : null,
       catchImmunity,
       immunityMs: catchImmunity * 60 * 1000,
+      shieldZones,
+      shieldDeadline: zoneUtils.shieldDeadline(gameStartTime, windowMs, zoneCount, shieldZones),
+      invisibility,
+      invisibilityMs: invisibility * 60 * 1000,
     };
+  }
+
+  // Whether a runner joining now is given a shield: not in a game played
+  // without them, nor once they have run out for everybody else
+  function shieldAvailable(schedule, now) {
+    return schedule.shieldZones > 0 && !(schedule.shieldDeadline && now >= schedule.shieldDeadline);
+  }
+
+  // The spell a runner spends invisible for keeping their shield until it ran
+  // out, or null if they didn't earn one. One still holding a shield past the
+  // deadline has earned it too - the schedule tick just hasn't taken it yet.
+  function invisibilityOf(player, schedule) {
+    if (player.team !== "runner" || !schedule.shieldDeadline || schedule.invisibilityMs <= 0) {
+      return null;
+    }
+
+    if (player.shield_lost_reason !== "expired" && !player.shield_active) {
+      return null;
+    }
+
+    return { start: schedule.shieldDeadline, end: schedule.shieldDeadline + schedule.invisibilityMs };
+  }
+
+  function isInvisible(player, schedule, now) {
+    const period = invisibilityOf(player, schedule);
+    return Boolean(period) && now >= period.start && now < period.end;
+  }
+
+  // What to leave out of a runner's live trail, so nobody can work out where
+  // they went while invisible once they reappear
+  function hiddenPeriods(player, schedule) {
+    const period = invisibilityOf(player, schedule);
+    return period ? [period] : [];
+  }
+
+  // Which zone's window a runner lost their shield in, for the results
+  function shieldLostZone(player, schedule) {
+    if (!player.shield_lost_at || !schedule.gameStartTime) {
+      return null;
+    }
+
+    return Math.min(schedule.zoneCount, zoneUtils.currentZoneIndex(player.shield_lost_at, schedule.gameStartTime, schedule.windowMs, schedule.zoneCount) + 1);
   }
 
   // Zone windows run on the game clock, so they have to close on their own: a
@@ -1269,8 +1338,16 @@ module.exports = function (io, db) {
         continue;
       }
 
-      const advanced = await advanceRunnerZones(room, schedule, runner);
-      changed = changed || advanced;
+      const missed = await checkForMissedZone(room, schedule, runner);
+      changed = changed || missed;
+    }
+
+    // Shields run out after the zones they cover. Anyone who missed the last of
+    // those zones went out over it just above, so only runners still in the
+    // game are left holding one.
+    if (schedule.shieldDeadline && Date.now() >= schedule.shieldDeadline) {
+      const expired = await expireShields(room, schedule);
+      changed = changed || expired;
     }
 
     if (Date.now() >= schedule.gameEndTime) {
@@ -1281,9 +1358,34 @@ module.exports = function (io, db) {
     }
   }
 
-  // Walk a runner up to the zone the clock is on, taking a life for every window
-  // that closed with its zone still uncaptured
-  async function advanceRunnerZones(room, schedule, runner) {
+  // Every runner still holding a shield loses it together. Having kept it that
+  // long, each of them goes invisible for a spell (see invisibilityOf).
+  async function expireShields(room, schedule) {
+    const holders = (await getTeamPlayers(room.room_id, "runner")).filter((runner) => runner.shield_active && runner.status !== "won" && runner.status !== "caught");
+
+    if (holders.length === 0) {
+      return false;
+    }
+
+    for (const runner of holders) {
+      await spendShield(runner.player_id, "expired", null);
+    }
+
+    console.log(`Shields ran out in room ${room.room_id} for ${holders.length} runner(s)`);
+
+    io.to(room.room_id).emit("shields_expired", {
+      zoneNumber: schedule.shieldZones,
+      invisibleUntil: schedule.invisibilityMs > 0 ? schedule.shieldDeadline + schedule.invisibilityMs : null,
+      players: holders.map((runner) => ({ playerId: runner.player_id, username: runner.username })),
+      timestamp: Date.now(),
+    });
+
+    return true;
+  }
+
+  // A runner still on a zone whose window the clock has passed never pinged
+  // inside it in time, and that puts them out - shield or no shield
+  async function checkForMissedZone(room, schedule, runner) {
     const target = await getActiveTarget(room.room_id, runner.player_id);
 
     if (!target) {
@@ -1291,44 +1393,23 @@ module.exports = function (io, db) {
     }
 
     const clockIndex = zoneUtils.currentZoneIndex(Date.now(), schedule.gameStartTime, schedule.windowMs, schedule.zoneCount);
-    let zoneIndex = target.zone_index || 0;
-    let changed = false;
+    const zoneIndex = target.zone_index || 0;
 
-    while (zoneIndex < clockIndex) {
-      // This zone's window has closed and the runner never pinged inside it
-      const missedZoneNumber = zoneIndex + 1;
-      console.log(`Runner ${runner.player_id} missed zone ${missedZoneNumber}`);
-
-      const strike = await applyStrike(room.room_id, runner.player_id, "missed_zone", schedule, missedZoneNumber);
-      changed = true;
-      zoneIndex += 1;
-
-      if (strike && strike.outcome === "eliminated") {
-        return changed;
-      }
-
-      // The clock has run out, so there is no further zone to move on to
-      if (zoneIndex >= schedule.zoneCount) {
-        break;
-      }
-
-      await moveTargetToZone(target, zoneIndex, schedule);
-
-      emitToPlayer(runner.player_id, "zone_missed", {
-        missedZoneNumber,
-        zoneNumber: zoneIndex + 1,
-        targetId: target.target_id,
-        windowOpenTime: target.activation_time,
-        timestamp: Date.now(),
-      });
+    if (zoneIndex >= clockIndex) {
+      return false;
     }
 
-    return changed;
+    const missedZoneNumber = zoneIndex + 1;
+    console.log(`Runner ${runner.player_id} missed zone ${missedZoneNumber}`);
+
+    await applyStrike(room.room_id, runner.player_id, "missed_zone", schedule, missedZoneNumber);
+    return true;
   }
 
-  // A catch or a missed zone costs a runner their shield - the one dog's life
-  // they share between the two. The second of either puts them out of the game
-  // and onto the hunters' team.
+  // A shield only ever stands between a runner and a hunter: their first catch
+  // costs them the shield if they still have one. A catch without one, or a
+  // missed zone whatever they are holding, puts them out of the game and onto
+  // the hunters' team.
   async function applyStrike(roomId, playerId, reason, schedule, zoneNumber = null) {
     const player = await getPlayerById(playerId);
 
@@ -1338,10 +1419,10 @@ module.exports = function (io, db) {
 
     const now = Date.now();
 
-    if (player.shield_active) {
+    if (reason === "caught" && player.shield_active) {
       // Losing the shield to a catch also buys a spell of immunity, so the
       // hunter who just caught them can't simply catch them again
-      const immunityUntil = reason === "caught" && schedule.immunityMs > 0 ? now + schedule.immunityMs : null;
+      const immunityUntil = schedule.immunityMs > 0 ? now + schedule.immunityMs : null;
       await spendShield(playerId, reason, immunityUntil);
 
       io.to(roomId).emit("shield_lost", {
@@ -1462,21 +1543,6 @@ module.exports = function (io, db) {
 
       playerSocket.emit(event, payloadFor(states.get(info.playerId)));
     }
-  }
-
-  // Send an event to a player's open connections, if they have any
-  function emitToPlayer(playerId, event, payload) {
-    connectedPlayers.forEach((info, socketId) => {
-      if (info.playerId !== playerId) {
-        return;
-      }
-
-      const playerSocket = io.sockets.sockets.get(socketId);
-
-      if (playerSocket) {
-        playerSocket.emit(event, payload);
-      }
-    });
   }
 
   async function getActiveRooms() {
@@ -1681,13 +1747,14 @@ module.exports = function (io, db) {
       // Get all players in the room
       const players = await getRoomPlayers(roomId);
       const runnerColorIndexes = getRunnerColorIndexes(players);
+      const schedule = roomSchedule(room);
 
       // Get trails for all runners
       const runnerTrails = {};
       const runnerPlayers = players.filter((player) => player.team === "runner");
 
       for (const runner of runnerPlayers) {
-        const trail = await getRunnerTrail(runner.player_id, { lat: runner.last_lat, lng: runner.last_lng, timestamp: runner.last_ping_time });
+        const trail = await getRunnerTrail(runner.player_id, { lat: runner.last_lat, lng: runner.last_lng, timestamp: runner.last_ping_time }, hiddenPeriods(runner, schedule));
         if (trail.sightings.length > 0) {
           runnerTrails[runner.player_id] = {
             playerId: runner.player_id,
@@ -1713,7 +1780,8 @@ module.exports = function (io, db) {
       const formattedTargets = targets.map(formatTarget);
 
       // Format players for client. Shields are public: hunters can see who still
-      // has one, and who is briefly immune after spending theirs.
+      // has one, who is briefly immune after spending theirs, and who is
+      // invisible for having kept theirs - though not where they are.
       const formattedPlayers = players.map((player) => ({
         playerId: player.player_id,
         roomId: player.room_id,
@@ -1723,7 +1791,9 @@ module.exports = function (io, db) {
         outcome: playerOutcome(player, room),
         shieldActive: Boolean(player.shield_active),
         shieldLostReason: player.shield_lost_reason || null,
+        shieldLostZone: shieldLostZone(player, schedule),
         immunityUntil: player.immunity_until || null,
+        invisibleUntil: player.shield_lost_reason === "expired" ? invisibilityOf(player, schedule)?.end || null : null,
         eliminationReason: player.elimination_reason || null,
         isHost: player.player_id === room.host_player_id,
 
@@ -1740,8 +1810,6 @@ module.exports = function (io, db) {
         colorIndex: runnerColorIndexes[player.player_id] ?? null,
       }));
 
-      const schedule = roomSchedule(room);
-
       // Construct game state
       const gameState = {
         roomId: room.room_id,
@@ -1750,6 +1818,9 @@ module.exports = function (io, db) {
         targetRadius: room.target_radius,
         gameDuration: schedule.gameDuration,
         catchImmunity: schedule.catchImmunity,
+        shieldZones: schedule.shieldZones,
+        shieldDeadline: schedule.shieldDeadline,
+        invisibility: schedule.invisibility,
         zoneCount: schedule.zoneCount,
         zoneWindowMs: schedule.windowMs,
         zoneLockMs: schedule.lockMs,

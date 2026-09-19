@@ -8,12 +8,14 @@
  * 20, and the final zone from 53 to 60. The lock stops a runner capturing zone
  * 1 the moment the game starts, or two zones back to back across a window
  * boundary. A runner who doesn't ping inside a zone before its window closes
- * loses a life, and the whole field moves on to the next zone together.
+ * is out, and the rest of the field moves on to the next zone together.
  *
- * Every runner starts with one shield - a dog's life shared between missing a
- * zone and being caught. The first of either costs the shield; the second puts
- * them out. Spending the shield on a catch also buys a short immunity so the
- * hunter who just caught them can't immediately catch them again.
+ * Every runner starts with one shield, which only ever stands between them and
+ * a hunter: the first catch costs the shield, the second puts them out. Spending
+ * it also buys a short immunity so the hunter who just caught them can't
+ * immediately catch them again. Shields only last the first few zones (two by
+ * default). When the last of those closes, every runner still holding one
+ * loses it - and for having kept it that long, goes invisible for a spell.
  */
 
 // The client's copy of the zone settings, for screens shown before any game
@@ -86,18 +88,36 @@ function zoneStatusAt(now, window) {
 }
 
 /**
- * A runner's shield and immunity at a point in time
- * @param {{shieldActive: boolean|number, immunityUntil: number|null}} player
+ * When every runner's shield runs out: the close of the last zone window it
+ * covers, so with the default of two zones in a 60 minute game, minute 20
+ * @param {number} shieldZones - How many zones shields last
+ * @returns {number|null} Null when shields never run out mid-game - there are
+ *   none at all, they last every zone, or the game hasn't started
+ */
+function shieldDeadline(gameStartTime, windowMs, zoneCount, shieldZones) {
+  if (!gameStartTime || !(shieldZones > 0) || shieldZones >= zoneCount) {
+    return null;
+  }
+
+  return gameStartTime + shieldZones * windowMs;
+}
+
+/**
+ * A runner's shield, immunity and invisibility at a point in time
+ * @param {{shieldActive: boolean|number, immunityUntil: number|null, invisibleUntil?: number|null}} player
  * @param {number} now - Current time in milliseconds
- * @returns {{hasShield: boolean, immune: boolean, immuneMsRemaining: number}}
+ * @returns {{hasShield: boolean, immune: boolean, immuneMsRemaining: number, invisible: boolean, invisibleMsRemaining: number}}
  */
 function shieldState(player, now) {
   const immuneMsRemaining = player && player.immunityUntil ? Math.max(0, player.immunityUntil - now) : 0;
+  const invisibleMsRemaining = player && player.invisibleUntil ? Math.max(0, player.invisibleUntil - now) : 0;
 
   return {
     hasShield: Boolean(player && player.shieldActive),
     immune: immuneMsRemaining > 0,
     immuneMsRemaining,
+    invisible: invisibleMsRemaining > 0,
+    invisibleMsRemaining,
   };
 }
 
@@ -119,6 +139,7 @@ const zoneUtils = {
   currentZoneIndex,
   gameEndTime,
   zoneStatusAt,
+  shieldDeadline,
   shieldState,
   formatCountdown,
 };

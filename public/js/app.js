@@ -148,13 +148,19 @@ function setupAllEventListeners() {
     GameMap.centerOnPlayer();
   });
 
-  // Spell out the zone windows as the host picks a game length and zone lock
+  // Spell out the zone windows, and when shields run out, as the host picks a
+  // game length, zone lock and how long shields last
   document.getElementById("game-duration").addEventListener("input", () => {
     UI.updateZoneWindowHint();
+    UI.updateShieldZonesHint();
   });
 
   document.getElementById("zone-lock").addEventListener("input", () => {
     UI.updateZoneWindowHint();
+  });
+
+  document.getElementById("shield-zones").addEventListener("input", () => {
+    UI.updateShieldZonesHint();
   });
 
   document.getElementById("caught-btn").addEventListener("click", reportSelfCaught);
@@ -259,8 +265,8 @@ function setupSocketConnection() {
   socket.on("game_started", handleGameStarted);
   socket.on("new_target", handleNewTarget);
   socket.on("zone_captured", handleZoneCaptured);
-  socket.on("zone_missed", handleZoneMissed);
   socket.on("shield_lost", handleShieldLost);
+  socket.on("shields_expired", handleShieldsExpired);
   socket.on("catch_rejected", handleCatchRejected);
   socket.on("runner_won", handleRunnerWon);
   socket.on("game_review", handleGameReview);
@@ -329,6 +335,8 @@ function createRoom() {
   const gameDuration = parseInt(document.getElementById("game-duration").value);
   const zoneLock = parseInt(document.getElementById("zone-lock").value);
   const catchImmunity = parseInt(document.getElementById("catch-immunity").value);
+  const shieldZones = parseInt(document.getElementById("shield-zones").value);
+  const invisibility = parseInt(document.getElementById("invisibility").value);
   const targetRadius = parseInt(document.getElementById("target-radius").value);
   const teamBtn = document.querySelector("#create-room-form .team-btn.selected");
 
@@ -362,6 +370,8 @@ function createRoom() {
     gameDuration,
     zoneLock,
     catchImmunity,
+    shieldZones,
+    invisibility,
     targetRadius,
     centralLat: location.lat,
     centralLng: location.lng,
@@ -434,7 +444,7 @@ function handleRejoinFailed(data) {
 }
 
 // Keep what we know about ourselves in step with the server. Our team can
-// change while the app is closed (miss two zones and you are a hunter), and the
+// change while the app is closed (miss a zone and you are a hunter), and the
 // host can change when a host leaves.
 function syncMyPlayer(state) {
   const me = (state.players || []).find((player) => player.playerId === gameState.playerId);
@@ -508,6 +518,24 @@ function updateLobbyUI(state) {
   const immunityElement = document.getElementById("catch-immunity-display");
   if (immunityElement && state.catchImmunity != null) {
     immunityElement.textContent = state.catchImmunity > 0 ? `${state.catchImmunity} min` : "None";
+  }
+
+  // How long shields last, and what keeping one until they run out earns
+  const shieldsLast = state.shieldZones != null && state.zoneCount && state.shieldZones < state.zoneCount;
+
+  const shieldZonesElement = document.getElementById("shield-zones-display");
+  if (shieldZonesElement && state.shieldZones != null) {
+    shieldZonesElement.textContent = !state.shieldZones ? "None" : shieldsLast ? `First ${state.shieldZones} zone${state.shieldZones === 1 ? "" : "s"}` : "Whole game";
+  }
+
+  const invisibilityElement = document.getElementById("invisibility-display");
+  if (invisibilityElement && state.invisibility != null) {
+    invisibilityElement.textContent = shieldsLast && state.invisibility > 0 ? `${state.invisibility} min` : "None";
+  }
+
+  const shieldNote = document.getElementById("shield-rules-note");
+  if (shieldNote && state.shieldZones != null) {
+    shieldNote.textContent = UI.shieldRulesText(state);
   }
 
   // Where the final zone might be hidden
@@ -730,27 +758,37 @@ function handleZoneCaptured(data) {
   Game.updateGameState(data.gameState);
 }
 
-// A zone's window closed before this runner reached it. What it cost them
-// arrives separately as shield_lost or runner_caught.
-function handleZoneMissed(data) {
-  console.log("Zone missed:", data);
-  const opensIn = data.windowOpenTime - Date.now();
-  const next = opensIn > 0 ? `opens in ${zoneUtils.formatCountdown(opensIn)}` : "is open now";
-  UI.showNotification(`Zone ${data.missedZoneNumber} closed. Zone ${data.zoneNumber} ${next}.`, "warning");
-}
-
-// Shields are public, so everyone hears when one is spent
+// Shields are public, so everyone hears when one is spent on a catch
 function handleShieldLost(data) {
   console.log("Shield lost:", data);
-
-  const cause = data.reason === "missed_zone" ? `missing zone ${data.zoneNumber}` : "being caught";
 
   if (data.playerId === gameState.playerId) {
     catchReportPending = false;
     const immuneFor = data.immunityUntil ? ` You are immune for ${zoneUtils.formatCountdown(data.immunityUntil - Date.now())}.` : "";
-    UI.showNotification(`Your shield took the hit for ${cause}. One more and you are out.${immuneFor}`, "warning");
+    UI.showNotification(`Your shield took the catch. Get caught again and you are out.${immuneFor}`, "warning");
   } else {
-    UI.showNotification(`${data.username} lost their shield (${cause}).`, "info");
+    UI.showNotification(`${data.username} lost their shield to a catch.`, "info");
+  }
+
+  socket.emit("resync_game_state", { roomId: gameState.roomId });
+}
+
+// Shields ran out for everyone still holding one, and each of them has gone
+// invisible for keeping it that long
+function handleShieldsExpired(data) {
+  console.log("Shields expired:", data);
+
+  const keepers = data.players || [];
+  const keptMine = keepers.some((player) => player.playerId === gameState.playerId);
+  const invisibleFor = data.invisibleUntil ? zoneUtils.formatCountdown(data.invisibleUntil - Date.now()) : null;
+
+  if (keptMine) {
+    UI.showNotification(invisibleFor ? `Shields are down. You kept yours, so you're invisible for ${invisibleFor} - nobody can see where you are.` : "Shields are down. Getting caught now puts you out.", "success");
+  } else {
+    // "Ruby", "Ruby and Rita", "Ruby, Rita and Sam"
+    const usernames = keepers.map((player) => player.username);
+    const names = usernames.length > 1 ? `${usernames.slice(0, -1).join(", ")} and ${usernames[usernames.length - 1]}` : usernames[0];
+    UI.showNotification(invisibleFor ? `Shields are down. ${names} kept theirs and ${keepers.length === 1 ? "is" : "are"} invisible for ${invisibleFor}.` : `Shields are down. ${names} lost theirs.`, "info");
   }
 
   socket.emit("resync_game_state", { roomId: gameState.roomId });
@@ -771,7 +809,7 @@ function handleRunnerCaught(data) {
 
   if (isMe) {
     catchReportPending = false;
-    UI.showNotification(missedZone ? `You missed zone ${data.zoneNumber} with no shield left. You are a Hunter now.` : "You have been caught! You are now a Hunter.", "warning");
+    UI.showNotification(missedZone ? `You missed zone ${data.zoneNumber}. You are a Hunter now.` : "You have been caught! You are now a Hunter.", "warning");
 
     // Change our team to hunter
     gameState.team = "hunter";
@@ -870,9 +908,13 @@ function updateGameOverUI(data) {
       result.className = "player-outcome";
       result.textContent = outcome.text;
 
-      // A runner who came home with their shield intact deserves the credit
-      if (player.outcome === "won" && player.shieldActive) {
-        result.textContent = `${outcome.text}, shield intact`;
+      // Whether each runner managed to hang on to their shield
+      const shieldText = UI.shieldOutcomeText(player, state);
+      if (shieldText) {
+        const shield = document.createElement("span");
+        shield.className = `player-outcome-shield ${player.shieldLostReason === "caught" ? "lost" : "kept"}`;
+        shield.textContent = shieldText;
+        result.appendChild(shield);
       }
 
       row.append(name, result);

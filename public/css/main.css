@@ -833,6 +833,18 @@ textarea:focus {
   margin-left: auto;
   font-size: var(--font-size-sm);
   white-space: nowrap;
+  text-align: right;
+}
+
+/* Whether a runner hung on to their shield, under how they finished */
+.player-outcome-shield {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.player-outcome-shield.kept {
+  color: #64b5f6;
 }
 
 .player-outcome-item.won {
@@ -1283,6 +1295,10 @@ textarea:focus {
   color: #ef7d54;
 }
 
+.player-shield.invisible {
+  color: #b39ddb;
+}
+
 .lobby-note {
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
@@ -1585,6 +1601,11 @@ textarea:focus {
 
 #shield-status-value.shield-spent {
   color: #ef7d54;
+}
+
+/* Kept their shield until shields ran out: nobody can see where they are */
+#shield-status-value.shield-invisible {
+  color: #b39ddb;
 }
 
 /* Zones remaining display styles */

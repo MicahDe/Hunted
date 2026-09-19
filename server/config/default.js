@@ -48,6 +48,18 @@ module.exports = {
     // shield, in minutes. Configurable per room at setup.
     defaultCatchImmunity: 3,
 
+    // How many zones shields last. When the last of them closes - minute 20
+    // with the defaults - every runner still holding one loses it. 0 means no
+    // shields at all, and one per zone means they last the whole game.
+    // Configurable per room at setup.
+    defaultShieldZones: 2,
+
+    // How long a runner who kept their shield until it ran out goes invisible
+    // for, in minutes: their location is not shared with anyone. With the
+    // defaults that covers zone 3's lock, so they can get into position for it
+    // unseen. Configurable per room at setup.
+    defaultInvisibility: 3,
+
     // How often the server checks rooms for zone windows closing
     scheduleTickInterval: 1000,
 

@@ -16,6 +16,8 @@ function initDatabase(db) {
             game_duration INTEGER,
             catch_immunity INTEGER,
             zone_lock INTEGER,
+            shield_zones INTEGER,
+            invisibility INTEGER,
             game_start_time INTEGER,
             final_lat REAL,
             final_lng REAL,
@@ -27,8 +29,9 @@ function initDatabase(db) {
             status TEXT
         )`);
 
-    // Players table. Every runner starts with one shield, spent by the first
-    // catch or missed zone window; the second of either puts them out.
+    // Players table. Every runner starts with one shield, spent by their first
+    // catch or lost when shields run out (shield_lost_reason 'caught' or
+    // 'expired'); a second catch, or any missed zone window, puts them out.
     db.run(`CREATE TABLE IF NOT EXISTS players (
             player_id TEXT PRIMARY KEY,
             room_id TEXT,
@@ -105,6 +108,8 @@ function initDatabase(db) {
         game_duration: "INTEGER",
         catch_immunity: "INTEGER",
         zone_lock: "INTEGER",
+        shield_zones: "INTEGER",
+        invisibility: "INTEGER",
         game_start_time: "INTEGER",
         final_lat: "REAL",
         final_lng: "REAL",

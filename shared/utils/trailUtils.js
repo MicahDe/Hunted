@@ -20,20 +20,26 @@ const COORDINATE_DECIMALS = 5;
  * @param {Array<{lat: number, lng: number, timestamp: number}>} rows - Location history, in any order
  * @param {number} now - Current time in milliseconds
  * @param {Object} options - Trail settings (see config.game.trail)
+ * @param {Array<{start: number, end: number}>} [hiddenPeriods] - Spells the runner was invisible
+ *   for. Nothing inside one is shown, and the trail always breaks across one, however short.
  * @returns {{sightings: Array<{start: number, end: number, points: Array<[number, number]>}>, heading: number|null}}
  *   Sightings oldest first, each with 1 to maxPointsPerSighting [lat, lng] points, plus the bearing
  *   (0-359) the runner was last moving in, or null if they weren't moving
  */
-function buildTrail(rows, now, options) {
+function buildTrail(rows, now, options, hiddenPeriods = []) {
   const { windowMs, sightingGapMs, minStepMeters, simplifyToleranceMeters, maxPointsPerSighting, headingMinDistanceMeters, headingMaxAgeMs } = options;
 
-  const points = rows.filter((row) => row.timestamp > now - windowMs).sort((a, b) => a.timestamp - b.timestamp);
+  const hidden = (timestamp) => hiddenPeriods.some((period) => timestamp >= period.start && timestamp < period.end);
+  const hiddenBetween = (from, to) => hiddenPeriods.some((period) => from < period.start && to >= period.start);
 
-  // Split into sightings wherever the runner went quiet
+  const points = rows.filter((row) => row.timestamp > now - windowMs && !hidden(row.timestamp)).sort((a, b) => a.timestamp - b.timestamp);
+
+  // Split into sightings wherever the runner went quiet, or went invisible
   const groups = [];
   for (const point of points) {
     const group = groups[groups.length - 1];
-    if (!group || point.timestamp - group[group.length - 1].timestamp > sightingGapMs) {
+    const previous = group && group[group.length - 1];
+    if (!group || point.timestamp - previous.timestamp > sightingGapMs || hiddenBetween(previous.timestamp, point.timestamp)) {
       groups.push([point]);
     } else {
       group.push(point);

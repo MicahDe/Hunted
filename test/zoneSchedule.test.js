@@ -4,10 +4,12 @@
  *
  * The rules being pinned down: a zone can only be captured inside its own
  * window, and not until the lock at the start of that window has run out; a
- * window that closes uncaptured costs the runner their shield, and a
- * catch costs the same single shield - so the second of either, in any order,
- * puts a runner out. Spending the shield on a catch also buys a spell of
- * immunity, which the server, not the client, has to enforce.
+ * window that closes uncaptured puts the runner out, shield or no shield. The
+ * shield only stands between a runner and a hunter: the first catch costs it,
+ * the second puts them out, and spending it buys a spell of immunity which the
+ * server, not the client, has to enforce. Shields run out for everyone after
+ * the first few zones, and anyone still holding one then goes invisible for a
+ * spell - their location kept from everybody, by the server.
  */
 
 const test = require("node:test");
@@ -30,7 +32,7 @@ const CENTRE = { lat: 51.5074, lng: -0.1278 };
  * Time is moved by rewriting the room's start time rather than by waiting, so a
  * test can put the clock 25 minutes into a 60 minute game.
  */
-async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration = 60, zoneLock = 3, catchImmunity = 3 } = {}) {
+async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration = 60, zoneLock = 3, catchImmunity = 3, shieldZones = 2, invisibility = 3 } = {}) {
   const db = new sqlite3.Database(":memory:");
   initDatabase(db);
 
@@ -102,6 +104,8 @@ async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration
     gameDuration,
     zoneLock,
     catchImmunity,
+    shieldZones,
+    invisibility,
     targetRadius: 500,
     centralLat: CENTRE.lat,
     centralLng: CENTRE.lng,
@@ -137,6 +141,7 @@ async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration
     players,
     broadcasts,
     manager,
+    connect,
     run,
     get,
     player: (username) => get("SELECT * FROM players WHERE room_id = ? AND username = ?", [roomId, username]),
@@ -308,7 +313,8 @@ test("zone 1 can't be captured the moment the game starts, only once its lock ru
 });
 
 test("zones 2 and 3 can't be captured one straight after the other", async () => {
-  const game = await createGame();
+  // Shields that last the whole game, so none run out at minute 20
+  const game = await createGame({ shieldZones: ZONE_COUNT });
 
   await game.setElapsed(4);
   await game.pingInsideZone("Ruby");
@@ -388,57 +394,40 @@ test("being in the right place at the wrong time captures nothing", async () => 
   assert.strictEqual(target.zone_index, 1, "a locked zone cannot be captured early");
 });
 
-test("a zone window closing uncaptured costs the shield, not the game", async () => {
+test("a zone window closing uncaptured puts a runner out, even with their shield", async () => {
   const game = await createGame();
 
   await game.setElapsed(11);
   await game.manager.processZoneSchedules();
 
   const runner = await game.player("Ruby");
-  assert.strictEqual(runner.shield_active, 0, "the missed zone should have taken the shield");
-  assert.strictEqual(runner.shield_lost_reason, "missed_zone");
-  assert.strictEqual(runner.team, "runner", "they are still in the game");
-  assert.strictEqual(runner.status, "active");
-
-  // A missed zone is not a catch, so it buys no immunity
-  assert.strictEqual(runner.immunity_until, null);
-
-  const lost = game.of("shield_lost");
-  assert.strictEqual(lost.length, 1);
-  assert.strictEqual(lost[0].payload.reason, "missed_zone");
-  assert.strictEqual(lost[0].payload.zoneNumber, 1);
-
-  // They are moved on to the zone the clock is now on, so they can keep playing
-  const target = await game.target("Ruby");
-  assert.strictEqual(target.zone_index, 1);
-  assert.strictEqual(target.radius_level, config.game.targetRadiusLevels[1]);
-
-  // Which is still in its lock, and they are told when it opens
-  const room = await game.room();
-  assert.strictEqual(target.activation_time, room.game_start_time + 13 * MINUTE);
-
-  const missed = game.players.Ruby.socket.received("zone_missed");
-  assert.strictEqual(missed.length, 1);
-  assert.strictEqual(missed[0].payload.windowOpenTime, target.activation_time);
-});
-
-test("a second missed zone puts a runner out and onto the hunters", async () => {
-  const game = await createGame();
-
-  await game.setElapsed(11);
-  await game.manager.processZoneSchedules();
-
-  await game.setElapsed(21);
-  await game.manager.processZoneSchedules();
-
-  const runner = await game.player("Ruby");
-  assert.strictEqual(runner.team, "hunter");
+  assert.strictEqual(runner.team, "hunter", "the shield only covers catches");
   assert.strictEqual(runner.status, "caught");
   assert.strictEqual(runner.elimination_reason, "missed_zone");
+
+  // The shield was never spent - it just didn't come into it
+  assert.strictEqual(runner.shield_active, 1);
+  assert.strictEqual(runner.shield_lost_reason, null);
+  assert.strictEqual(game.of("shield_lost").length, 0);
 
   const caught = game.of("runner_caught");
   assert.strictEqual(caught.length, 1);
   assert.strictEqual(caught[0].payload.reason, "missed_zone");
+  assert.strictEqual(caught[0].payload.zoneNumber, 1);
+});
+
+test("a runner who has lost their shield to a catch is put out by a missed zone too", async () => {
+  const game = await createGame();
+
+  game.players.Ruby.socket.fire("player_caught", { caughtPlayerId: game.players.Ruby.playerId });
+  await settle();
+
+  await game.setElapsed(11);
+  await game.manager.processZoneSchedules();
+
+  const runner = await game.player("Ruby");
+  assert.strictEqual(runner.team, "hunter");
+  assert.strictEqual(runner.elimination_reason, "missed_zone");
 });
 
 test("a runner who captured their zone keeps their shield when the window rolls over", async () => {
@@ -456,7 +445,7 @@ test("a runner who captured their zone keeps their shield when the window rolls 
   assert.strictEqual(target.zone_index, 1, "they stay on the zone they were already shown");
 });
 
-test("windows missed while the server was down are caught up one life at a time", async () => {
+test("a window missed while the server was down still puts the runner out when it comes back", async () => {
   const game = await createGame();
 
   // Two windows pass before the schedule is next processed
@@ -464,8 +453,12 @@ test("windows missed while the server was down are caught up one life at a time"
   await game.manager.processZoneSchedules();
 
   const runner = await game.player("Ruby");
-  assert.strictEqual(runner.team, "hunter", "two missed windows is two strikes");
+  assert.strictEqual(runner.team, "hunter");
   assert.strictEqual(runner.status, "caught");
+  assert.strictEqual(runner.elimination_reason, "missed_zone");
+  assert.strictEqual(runner.shield_lost_reason, null, "going out over zone 1 isn't keeping a shield until it ran out");
+  assert.strictEqual(game.of("runner_caught").length, 1, "they only go out once");
+  assert.strictEqual(game.of("shields_expired").length, 0);
 });
 
 test("the first catch takes the shield and buys immunity", async () => {
@@ -517,20 +510,6 @@ test("a catch once immunity has run out puts the runner out", async () => {
 
   const runner = await game.player("Ruby");
   assert.strictEqual(runner.team, "hunter");
-  assert.strictEqual(runner.elimination_reason, "caught");
-});
-
-test("the shield is shared: a missed zone then a catch puts a runner out", async () => {
-  const game = await createGame();
-
-  await game.setElapsed(11);
-  await game.manager.processZoneSchedules();
-
-  game.players.Ruby.socket.fire("player_caught", { caughtPlayerId: game.players.Ruby.playerId });
-  await settle();
-
-  const runner = await game.player("Ruby");
-  assert.strictEqual(runner.team, "hunter", "the shield was already spent on the missed zone");
   assert.strictEqual(runner.elimination_reason, "caught");
 });
 
@@ -608,8 +587,9 @@ test("a runner who has won stays where they finished, rather than giving the fin
   assert.strictEqual(game.of("runner_location").filter((entry) => entry.payload.playerId === game.players.Ruby.playerId).length, sightings, "nobody is sent where they are now");
 });
 
-test("the game ends when the clock runs out, and stragglers lose a life on the way", async () => {
-  const game = await createGame();
+test("the game ends when the clock runs out, and stragglers miss the final zone on the way", async () => {
+  // Shields that last the whole game, which still can't save a missed zone
+  const game = await createGame({ shieldZones: ZONE_COUNT });
 
   // Capture every zone but the last, so only the final window is missed
   await game.run("UPDATE targets SET zone_index = ?, radius_level = ? WHERE player_id = ?", [ZONE_COUNT - 1, config.game.targetRadiusLevels[ZONE_COUNT - 1], game.players.Ruby.playerId]);
@@ -617,16 +597,267 @@ test("the game ends when the clock runs out, and stragglers lose a life on the w
   await game.manager.processZoneSchedules();
 
   const runner = await game.player("Ruby");
-  assert.strictEqual(runner.shield_active, 0, "the final window closed uncaptured");
-
-  // A shield saves them from becoming a hunter, but it cannot win them the
-  // game: only capturing the final zone inside its window does that
-  assert.strictEqual(runner.team, "runner");
-  assert.strictEqual(runner.status, "active");
-  assert.notStrictEqual(runner.status, "won");
+  assert.strictEqual(runner.status, "caught", "the final window closed uncaptured");
+  assert.strictEqual(runner.elimination_reason, "missed_zone");
   assert.strictEqual((await game.target("Ruby")).status, "active", "their final target was never reached");
 
   const over = game.of("game_over");
   assert.strictEqual(over.length, 1);
   assert.strictEqual((await game.room()).status, "completed");
+});
+
+// Capture zones 1 and 2 inside their windows, which leaves the clock at minute
+// 14 and each runner on zone 3 - the shape of a game where they are still
+// holding their shield when shields run out at minute 20
+async function captureFirstTwoZones(game, ...usernames) {
+  await game.setElapsed(4);
+  for (const username of usernames) await game.pingInsideZone(username);
+
+  await game.setElapsed(14);
+  for (const username of usernames) await game.pingInsideZone(username);
+}
+
+// A point the given distance and bearing from the middle of the target area
+function awayFromCentre(bearing, metres) {
+  return geoUtils.calculateDestination(CENTRE.lat, CENTRE.lng, bearing, metres);
+}
+
+test("shields run out for everyone still holding one when zone 2 closes", async () => {
+  const game = await createGame({ runners: ["Ruby", "Sam"] });
+  await captureFirstTwoZones(game, "Ruby", "Sam");
+
+  // Sam is caught during zone 2, so has no shield left to keep. Everyone can
+  // see where he lost it - checked now, since winding the clock on moves the
+  // game's start and with it which window the catch looks to have been in.
+  game.players.Sam.socket.fire("player_caught", { caughtPlayerId: game.players.Sam.playerId });
+  await settle();
+
+  game.players.Hank.socket.fire("resync_game_state", { roomId: game.roomId });
+  await settle();
+  assert.strictEqual(game.players.Hank.socket.lastState().players.find((player) => player.username === "Sam").shieldLostZone, 2);
+
+  await game.setElapsed(19);
+  await game.manager.processZoneSchedules();
+  assert.strictEqual((await game.player("Ruby")).shield_active, 1, "shields hold until zone 2 closes");
+  assert.strictEqual(game.of("shields_expired").length, 0);
+
+  await game.setElapsed(20);
+  await game.manager.processZoneSchedules();
+
+  const ruby = await game.player("Ruby");
+  assert.strictEqual(ruby.shield_active, 0);
+  assert.strictEqual(ruby.shield_lost_reason, "expired");
+  assert.strictEqual(ruby.immunity_until, null, "running out buys no immunity");
+  assert.strictEqual(ruby.team, "runner", "and costs them nothing else");
+  assert.strictEqual(ruby.status, "active");
+  assert.strictEqual((await game.player("Sam")).shield_lost_reason, "caught");
+
+  const room = await game.room();
+  const expired = game.of("shields_expired");
+  assert.strictEqual(expired.length, 1);
+  assert.strictEqual(expired[0].payload.zoneNumber, 2);
+  assert.deepStrictEqual(expired[0].payload.players, [{ playerId: game.players.Ruby.playerId, username: "Ruby" }], "only the runner who kept theirs goes invisible");
+  assert.strictEqual(expired[0].payload.invisibleUntil, room.game_start_time + 23 * MINUTE);
+
+  // It only happens once
+  await game.manager.processZoneSchedules();
+  assert.strictEqual(game.of("shields_expired").length, 1);
+
+  // Everyone is told who is invisible, and who lost their shield where
+  game.players.Hank.socket.fire("resync_game_state", { roomId: game.roomId });
+  await settle();
+
+  const state = game.players.Hank.socket.lastState();
+  const rubyState = state.players.find((player) => player.username === "Ruby");
+  const samState = state.players.find((player) => player.username === "Sam");
+  assert.strictEqual(state.shieldZones, 2);
+  assert.strictEqual(state.shieldDeadline, room.game_start_time + 20 * MINUTE);
+  assert.strictEqual(state.invisibility, 3);
+  assert.strictEqual(rubyState.shieldLostReason, "expired");
+  assert.strictEqual(rubyState.invisibleUntil, room.game_start_time + 23 * MINUTE);
+  assert.strictEqual(samState.shieldLostReason, "caught");
+  assert.strictEqual(samState.invisibleUntil, null);
+});
+
+test("a runner who kept their shield can capture zones while invisible, without anyone seeing where", async () => {
+  // Invisible from minute 20 to 25, and zone 3 opens at 23
+  const game = await createGame({ invisibility: 5 });
+  await captureFirstTwoZones(game, "Ruby");
+  const lastSeen = await game.player("Ruby");
+
+  await game.setElapsed(20);
+  await game.manager.processZoneSchedules();
+
+  const sightings = () => game.of("runner_location").filter((entry) => entry.payload.playerId === game.players.Ruby.playerId).length;
+  const before = sightings();
+
+  await game.setElapsed(24);
+  await game.pingInsideZone("Ruby");
+
+  assert.strictEqual((await game.target("Ruby")).zone_index, 3, "the ping still captured zone 3");
+  assert.strictEqual(game.players.Ruby.socket.received("zone_captured").length, 3);
+  assert.strictEqual(sightings(), before, "nobody is sent where they are");
+
+  const after = await game.player("Ruby");
+  assert.strictEqual(after.last_lat, lastSeen.last_lat, "the location everyone is shown stays where they were last seen");
+  assert.strictEqual(after.last_lng, lastSeen.last_lng);
+  assert.strictEqual(after.last_ping_time, lastSeen.last_ping_time);
+
+  game.players.Hank.socket.fire("resync_game_state", { roomId: game.roomId });
+  await settle();
+
+  const rubyState = game.players.Hank.socket.lastState().players.find((player) => player.username === "Ruby");
+  assert.deepStrictEqual(rubyState.location, { lat: lastSeen.last_lat, lng: lastSeen.last_lng });
+});
+
+test("once invisibility is over a runner is seen again, with a gap in their trail where they were invisible", async () => {
+  const game = await createGame();
+  await captureFirstTwoZones(game, "Ruby");
+
+  await game.setElapsed(20);
+  await game.manager.processZoneSchedules();
+  await game.setElapsed(24);
+
+  // Lay out Ruby's history on the clock: seen at minutes 18 and 19, then
+  // somewhere else entirely at 21 and 22 while invisible
+  const start = (await game.room()).game_start_time;
+  const rubyId = game.players.Ruby.playerId;
+  const seen = [awayFromCentre(0, 300), awayFromCentre(0, 350)];
+  const hidden = [awayFromCentre(180, 300), awayFromCentre(180, 350)];
+
+  await game.run("DELETE FROM location_history WHERE player_id = ?", [rubyId]);
+  for (const [point, minute] of [
+    [seen[0], 18],
+    [seen[1], 19],
+    [hidden[0], 21],
+    [hidden[1], 22],
+  ]) {
+    await game.run("INSERT INTO location_history (player_id, room_id, lat, lng, timestamp) VALUES (?, ?, ?, ?, ?)", [rubyId, game.roomId, point.lat, point.lng, start + minute * MINUTE]);
+  }
+  await game.run("UPDATE players SET last_lat = ?, last_lng = ?, last_ping_time = ? WHERE player_id = ?", [seen[1].lat, seen[1].lng, start + 19 * MINUTE, rubyId]);
+
+  const now = awayFromCentre(90, 300);
+  game.players.Ruby.socket.fire("location_update", { lat: now.lat, lng: now.lng });
+  await settle();
+
+  const shared = game.of("runner_location").filter((entry) => entry.payload.playerId === rubyId);
+  const latest = shared[shared.length - 1].payload;
+  assert.deepStrictEqual(latest.location, { lat: now.lat, lng: now.lng }, "they are shown where they are again");
+
+  const points = latest.trail.sightings.flatMap((sighting) => sighting.points);
+  const nearest = (point) => Math.min(...points.map(([lat, lng]) => geoUtils.calculateDistance(lat, lng, point.lat, point.lng)));
+
+  assert.ok(nearest(seen[0]) < 5, "where they were seen before is still on the trail");
+  assert.ok(nearest(now) < 5);
+  for (const point of hidden) {
+    assert.ok(nearest(point) > 100, "nothing from while they were invisible is on the trail");
+  }
+  assert.ok(latest.trail.sightings.length >= 2, "the trail breaks across the invisible spell");
+});
+
+test("hunters are never invisible, even though nobody took a shield off them", async () => {
+  const game = await createGame();
+  await captureFirstTwoZones(game, "Ruby");
+
+  await game.setElapsed(21);
+  await game.manager.processZoneSchedules();
+
+  const spot = awayFromCentre(45, 200);
+  game.players.Hank.socket.fire("location_update", { lat: spot.lat, lng: spot.lng });
+  await settle();
+
+  const hank = game.of("runner_location").filter((entry) => entry.payload.playerId === game.players.Hank.playerId);
+  assert.strictEqual(hank.length, 1);
+  assert.deepStrictEqual(hank[0].payload.location, { lat: spot.lat, lng: spot.lng });
+});
+
+test("with invisibility off, a runner who kept their shield just loses it", async () => {
+  const game = await createGame({ invisibility: 0 });
+  await captureFirstTwoZones(game, "Ruby");
+  const sightings = () => game.of("runner_location").filter((entry) => entry.payload.playerId === game.players.Ruby.playerId).length;
+
+  await game.setElapsed(21);
+  await game.manager.processZoneSchedules();
+
+  assert.strictEqual((await game.player("Ruby")).shield_lost_reason, "expired");
+  assert.strictEqual(game.of("shields_expired")[0].payload.invisibleUntil, null);
+
+  const before = sightings();
+  const spot = awayFromCentre(45, 200);
+  game.players.Ruby.socket.fire("location_update", { lat: spot.lat, lng: spot.lng });
+  await settle();
+
+  assert.strictEqual(sightings(), before + 1, "their ping is shared as usual");
+});
+
+test("getting caught after shields have run out puts a runner out", async () => {
+  const game = await createGame();
+  await captureFirstTwoZones(game, "Ruby");
+
+  await game.setElapsed(21);
+  await game.manager.processZoneSchedules();
+
+  // Invisible, but found anyway
+  game.players.Hank.socket.fire("player_caught", { caughtPlayerId: game.players.Ruby.playerId });
+  await settle();
+
+  const runner = await game.player("Ruby");
+  assert.strictEqual(runner.team, "hunter");
+  assert.strictEqual(runner.elimination_reason, "caught");
+});
+
+test("a runner joining a game under way gets a shield only while everyone else still has theirs", async () => {
+  const game = await createGame();
+
+  await game.setElapsed(5);
+  const early = game.connect("socket-Early");
+  early.fire("join_room", { roomName: "test-room", username: "Early", team: "runner" });
+  await settle();
+  assert.strictEqual((await game.player("Early")).shield_active, 1);
+
+  await game.setElapsed(21);
+  const late = game.connect("socket-Late");
+  late.fire("join_room", { roomName: "test-room", username: "Late", team: "runner" });
+  await settle();
+  assert.strictEqual((await game.player("Late")).shield_active, 0, "shields have already run out");
+});
+
+test("with shields set to none, runners start without one and a single catch puts them out", async () => {
+  const game = await createGame({ shieldZones: 0 });
+
+  assert.strictEqual((await game.player("Ruby")).shield_active, 0);
+
+  game.players.Hank.socket.fire("player_caught", { caughtPlayerId: game.players.Ruby.playerId });
+  await settle();
+
+  assert.strictEqual((await game.player("Ruby")).team, "hunter");
+  assert.strictEqual(game.of("shields_expired").length, 0);
+});
+
+test("with shields covering every zone, they never run out", async () => {
+  const game = await createGame({ shieldZones: ZONE_COUNT });
+
+  // Keep Ruby on the zone the clock is on, well past where shields usually end
+  await game.run("UPDATE targets SET zone_index = 4, radius_level = ? WHERE player_id = ?", [config.game.targetRadiusLevels[4], game.players.Ruby.playerId]);
+  await game.setElapsed(45);
+  await game.manager.processZoneSchedules();
+
+  assert.strictEqual((await game.player("Ruby")).shield_active, 1);
+  assert.strictEqual(game.of("shields_expired").length, 0);
+});
+
+test("the host's shield settings are kept with the room, and kept sensible", async () => {
+  const game = await createGame({ shieldZones: 3, invisibility: 5 });
+  const room = await game.room();
+  assert.strictEqual(room.shield_zones, 3);
+  assert.strictEqual(room.invisibility, 5);
+
+  game.players.Hank.socket.fire("resync_game_state", { roomId: game.roomId });
+  await settle();
+  assert.strictEqual(game.players.Hank.socket.lastState().shieldDeadline, room.game_start_time + 30 * MINUTE);
+
+  const extreme = await createGame({ shieldZones: 99, invisibility: -4 });
+  const extremeRoom = await extreme.room();
+  assert.strictEqual(extremeRoom.shield_zones, ZONE_COUNT, "no more zones than the game has");
+  assert.strictEqual(extremeRoom.invisibility, 0);
 });

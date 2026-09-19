@@ -171,3 +171,23 @@ test('sends coordinates as compact [lat, lng] pairs rounded to about a metre', (
     assert.strictEqual(lng, Number(lng.toFixed(5)));
   }
 });
+
+test('leaves out where a runner went while invisible, and breaks the trail across it however short', () => {
+  // A steady walk with pings every 3 seconds, which would normally be one sighting
+  const rows = walk({ from: [0, 0], to: [400, 0], startAt: START, durationMs: 4 * MINUTE });
+  const invisible = { start: START + MINUTE, end: START + 2 * MINUTE };
+  const now = lastOf(rows).timestamp;
+
+  assert.strictEqual(buildTrail(rows, now, options).sightings.length, 1);
+
+  const trail = buildTrail(rows, now, options, [invisible]);
+  assert.strictEqual(trail.sightings.length, 2, 'a one minute spell is shorter than the sighting gap, but still breaks the trail');
+  assert.ok(trail.sightings[0].end < invisible.start);
+  assert.ok(trail.sightings[1].start >= invisible.end);
+
+  // Every point drawn is one of the pings from outside the spell
+  const seen = rows.filter((row) => row.timestamp < invisible.start || row.timestamp >= invisible.end);
+  for (const point of trail.sightings.flatMap((sighting) => sighting.points)) {
+    assert.ok(Math.min(...seen.map((row) => metresBetween(point, row))) < 2, 'a trail point came from inside the invisible spell');
+  }
+});

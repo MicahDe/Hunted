@@ -44,12 +44,19 @@ connection never removes a player**; in the lobby it just shows them as away
 
 - **`start_game`** is host only, needs at least one runner, and only starts a
   room that is still in the lobby. It starts the game clock, hides the final
-  zone in the target area, gives every runner their zone chain and a full
-  shield, and sends each player `game_started` with their own view of the game.
-- The server ticks every second (`processZoneSchedules`), charging a life for
-  every zone window that closes uncaptured and ending the game when the final
-  window closes. Runners capture zones and win through `location_update`, and
-  report catches through `player_caught`.
+  zone in the target area, gives every runner their zone chain and a shield
+  (unless the room has none), and sends each player `game_started` with their
+  own view of the game.
+- The server ticks every second (`processZoneSchedules`), putting out any
+  runner whose zone window closed uncaptured, running shields out once the
+  room's `shield_zones` have closed (`shields_expired`), and ending the game
+  when the final window closes. Runners capture zones and win through
+  `location_update`, and report catches through `player_caught`.
+- A runner who still had their shield when shields ran out is invisible for
+  the room's `invisibility` minutes: their `location_update`s still capture
+  zones and go into `location_history`, but aren't broadcast, don't move
+  `last_lat`/`last_lng`, and are left out of live trails. The end of game
+  replay shows them.
 - The game also ends as soon as every runner has won or is out.
 
 ### One change at a time

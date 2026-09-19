@@ -747,14 +747,15 @@ const GameMap = {
 
     const secondsAgo = this.secondsSince(player.lastPingTime);
     const timeAgo = this.formatTimeElapsed(secondsAgo);
-
-    // Opacity ranges from 1.0 (fresh) to 0.8 (5 mins old)
-    marker.setOpacity(Math.max(0.8, 1 - (secondsAgo / 300) * 0.2));
-    marker.getPopup().setContent(this.playerPopupContent(player, timeAgo));
     const shield = this.shieldLabel(playerId);
+
+    // Opacity ranges from 1.0 (fresh) to 0.8 (5 mins old). An invisible runner
+    // is a ghost of where they were last seen.
+    marker.setOpacity(shield && shield.invisible ? 0.4 : Math.max(0.8, 1 - (secondsAgo / 300) * 0.2));
+    marker.getPopup().setContent(this.playerPopupContent(player, timeAgo));
     // Name on top and how long ago underneath, so a long name doesn't
     // stretch the label across the map
-    this.setLabelText(this.runnerLabels[playerId], `${player.username}${shield ? shield.badge : ""}\n${timeAgo} ago`);
+    this.setLabelText(this.runnerLabels[playerId], `${player.username}${shield ? shield.badge : ""}\n${shield && shield.status ? shield.status : `${timeAgo} ago`}`);
 
     const trail = this.runnerTrails[playerId];
     if (!trail) return;
@@ -881,8 +882,9 @@ const GameMap = {
     this.drawnZoneStatus = zoneStatus;
   },
 
-  // Shields are public, so the map can show who still has one and who is
-  // currently immune. Called whenever a new game state arrives.
+  // Shields are public, so the map can show who still has one, who is
+  // currently immune and who is invisible. Called whenever a new game state
+  // arrives.
   setShieldStates: function (players) {
     this.shieldStates = {};
 
@@ -892,6 +894,7 @@ const GameMap = {
         status: player.status,
         shieldActive: player.shieldActive,
         immunityUntil: player.immunityUntil,
+        invisibleUntil: player.invisibleUntil,
       };
     });
 
@@ -912,7 +915,14 @@ const GameMap = {
       return { badge: " 🏁", detail: "Made it home - this is where they finished" };
     }
 
-    const shield = zoneUtils.shieldState({ shieldActive: player.shieldActive, immunityUntil: player.immunityUntil }, Date.now());
+    const shield = zoneUtils.shieldState(player, Date.now());
+
+    // They kept their shield until shields ran out, so for now nobody is told
+    // where they are - only where they were before they went invisible
+    if (shield.invisible) {
+      const remaining = zoneUtils.formatCountdown(shield.invisibleMsRemaining);
+      return { badge: " 👻", detail: `Invisible for ${remaining}`, invisible: true, status: `invisible ${remaining}` };
+    }
 
     if (shield.immune) {
       return { badge: " ⏱", detail: `Immune for ${zoneUtils.formatCountdown(shield.immuneMsRemaining)}` };
@@ -922,7 +932,7 @@ const GameMap = {
       return { badge: " 🛡", detail: "Shield intact" };
     }
 
-    return { badge: "", detail: "No shield - one more and they are out" };
+    return { badge: "", detail: "No shield - one catch and they are out" };
   },
 
   // The whole game on one map, once it is over: where every runner was seen,
@@ -1162,7 +1172,8 @@ const GameMap = {
     return geoUtils.calculateDistance(lat1, lng1, lat2, lng2);
   },
 
-  // Start timer to keep "ago" labels and trail fading up to date between pings
+  // Start timer to keep "ago" labels, invisibility countdowns and trail fading
+  // up to date between pings
   startLabelUpdateTimer: function () {
     // Clear any existing timer
     if (this.labelUpdateTimer) {
@@ -1171,6 +1182,6 @@ const GameMap = {
 
     this.labelUpdateTimer = setInterval(() => {
       Object.keys(this.playerDataCache).forEach((playerId) => this.refreshPlayerTimes(playerId));
-    }, 5000);
+    }, 1000);
   },
 };

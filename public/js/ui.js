@@ -74,7 +74,10 @@ const UI = {
     document.getElementById("game-duration").value = 60;
     document.getElementById("zone-lock").value = 3;
     document.getElementById("catch-immunity").value = 3;
+    document.getElementById("shield-zones").value = 2;
+    document.getElementById("invisibility").value = 3;
     this.updateZoneWindowHint();
+    this.updateShieldZonesHint();
 
     // Reset team selection
     const teamBtns = document.querySelectorAll("#create-room-form .team-btn");
@@ -123,6 +126,49 @@ const UI = {
     const openMinutes = Math.round((windowMs - lockMs) / 60000);
     const capped = lockMinutes < requestedLock ? " (at most half the window)" : "";
     hint.textContent = `${zoneCount} zones, one every ${windowMinutes} min: locked for ${lockMinutes}${capped}, then open for ${openMinutes}`;
+  },
+
+  // Spell out when the chosen number of zones means shields run out: with the
+  // defaults, when zone 2 closes 20 minutes in
+  updateShieldZonesHint: function () {
+    const durationInput = document.getElementById("game-duration");
+    const shieldInput = document.getElementById("shield-zones");
+    const hint = document.getElementById("shield-zones-hint");
+    if (!durationInput || !shieldInput || !hint) return;
+
+    const zoneCount = zoneUtils.DEFAULT_RADIUS_LEVELS.length;
+    const duration = parseInt(durationInput.value, 10);
+    const shieldZones = parseInt(shieldInput.value, 10);
+
+    if (!Number.isFinite(shieldZones) || shieldZones <= 0) {
+      hint.textContent = "No shields: a single catch puts a Runner out";
+      return;
+    }
+
+    if (shieldZones >= zoneCount) {
+      hint.textContent = "Shields last the whole game, so nobody goes invisible";
+      return;
+    }
+
+    const minutesIn = Number.isFinite(duration) && duration > 0 ? `, ${Math.round((zoneUtils.zoneWindowMs(duration, zoneCount) * shieldZones) / 60000)} min in` : "";
+    hint.textContent = `Every Runner's shield runs out when zone ${shieldZones} closes${minutesIn}`;
+  },
+
+  // The shield rules for the game the host set up, for the lobby
+  shieldRulesText: function (state) {
+    if (!state.shieldZones) {
+      return "There are no shields this game: one catch puts a Runner out, and so does missing a zone.";
+    }
+
+    const immunity = state.catchImmunity > 0 ? ` and makes you immune for ${state.catchImmunity} min` : "";
+    const rules = `Every Runner starts with one shield against the Hunters. The first catch takes it${immunity}; the second puts you out. Missing a zone always puts you out, shield or not.`;
+
+    if (!state.zoneCount || state.shieldZones >= state.zoneCount) {
+      return `${rules} Shields last the whole game.`;
+    }
+
+    const reward = state.invisibility > 0 ? ` Still have yours then and you go invisible for ${state.invisibility} min: nobody is shown where you are.` : "";
+    return `${rules} Shields run out for everyone when zone ${state.shieldZones} closes.${reward}`;
   },
 
   // Initialize the join room screen
@@ -306,10 +352,14 @@ const UI = {
     }
   },
 
-  // A runner's shield, as everyone else sees it: still held, spent, or holding
-  // off catches for a little longer
+  // A runner's shield, as everyone else sees it: still held, spent, holding
+  // off catches for a little longer, or kept long enough to go invisible
   shieldBadgeContent: function (runner) {
-    const shield = zoneUtils.shieldState({ shieldActive: runner.shieldActive, immunityUntil: runner.immunityUntil }, Date.now());
+    const shield = zoneUtils.shieldState(runner, Date.now());
+
+    if (shield.invisible) {
+      return { state: "invisible", text: `👻 Invisible ${zoneUtils.formatCountdown(shield.invisibleMsRemaining)}` };
+    }
 
     if (shield.immune) {
       return { state: "immune", text: `🛡 Immune ${zoneUtils.formatCountdown(shield.immuneMsRemaining)}` };
@@ -320,6 +370,27 @@ const UI = {
     }
 
     return { state: "spent", text: "⚠ Last life" };
+  },
+
+  // How a runner's shield went, for the results: kept until shields ran out,
+  // lost to a catch, or never needed. Null when there is nothing to say - no
+  // shields that game, or they went out over a missed zone (or left) still
+  // holding it, which is no credit to the shield.
+  shieldOutcomeText: function (player, state) {
+    if (player.colorIndex == null) {
+      return null;
+    }
+
+    if (player.shieldLostReason === "expired") {
+      return state.invisibility > 0 ? "🛡 Kept their shield, went invisible" : "🛡 Kept their shield";
+    }
+
+    if (player.shieldLostReason === "caught") {
+      return player.shieldLostZone ? `Shield lost to a catch in zone ${player.shieldLostZone}` : "Shield lost to a catch";
+    }
+
+    const wentOut = player.outcome === "missed_zone" || player.outcome === "left";
+    return player.shieldActive && !wentOut ? "🛡 Shield intact" : null;
   },
 
   // Keep immunity countdowns in the menu ticking without rebuilding the lists

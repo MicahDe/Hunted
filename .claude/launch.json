@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["start"],
       "port": 3000
+    },
+    {
+      "name": "hunted-scratch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["-e", "process.env.DB_PATH = 'database/scratch.db'; process.env.PORT = '3100'; require('./server/server.js')"],
+      "port": 3100
     }
   ]
 }

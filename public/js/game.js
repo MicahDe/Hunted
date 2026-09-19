@@ -26,6 +26,10 @@ const Game = {
   // Whether a game is being played on this screen: GPS on, pings going out
   running: false,
 
+  // Whether we were invisible at the last status tick, to catch the moment we
+  // stop being
+  wasInvisible: false,
+
   // Initialize the game
   init: function (gameState, socket, initialState) {
     console.log("Initializing game with state:", initialState);
@@ -210,8 +214,8 @@ const Game = {
     // Store new state
     this.gameState = { ...state };
 
-    // Our team can change without us hearing about it directly - miss two
-    // zones with the app closed and you come back a hunter
+    // Our team can change without us hearing about it directly - miss a zone
+    // with the app closed and you come back a hunter
     const me = this.getMyPlayer();
 
     if (me && this.playerInfo && me.team !== this.playerInfo.team) {
@@ -285,7 +289,8 @@ const Game = {
     this.updateZoneStatusDisplay(now, isRunner);
     this.updateShieldDisplay(now, isRunner);
 
-    // The menu's immunity countdowns only matter while someone is looking
+    // The menu's immunity and invisibility countdowns only matter while
+    // someone is looking
     const menu = document.getElementById("game-menu");
 
     if (menu && menu.classList.contains("open")) {
@@ -363,7 +368,7 @@ const Game = {
       const remaining = target.windowCloseTime - now;
       zoneValue.textContent = `⏳ ${zoneUtils.formatCountdown(remaining)}`;
 
-      // Under a minute left to reach it, with a life riding on it
+      // Under a minute left to reach it, with the game riding on it
       zoneValue.classList.add(remaining < 60 * 1000 ? "zone-closing" : "zone-open");
       return;
     }
@@ -372,7 +377,8 @@ const Game = {
     zoneValue.classList.add("zone-closing");
   },
 
-  // Your own shield, and the immunity a catch buys you
+  // Your own shield, the immunity a catch buys you, and the invisibility that
+  // keeping it until shields run out earns you
   updateShieldDisplay: function (now, isRunner) {
     const container = document.getElementById("shield-status-container");
     const value = document.getElementById("shield-status-value");
@@ -384,14 +390,33 @@ const Game = {
     if (!isRunner || !player || player.status === "caught" || player.status === "won") {
       container.style.display = "none";
       this.updateCaughtButton(null, player && player.status === "won");
+      this.wasInvisible = false;
       return;
     }
 
-    const shield = zoneUtils.shieldState({ shieldActive: player.shieldActive, immunityUntil: player.immunityUntil }, now);
+    const shield = zoneUtils.shieldState(player, now);
     container.style.display = "block";
-    value.classList.remove("shield-held", "shield-immune", "shield-spent");
+    value.classList.remove("shield-held", "shield-immune", "shield-spent", "shield-invisible");
 
-    if (shield.immune) {
+    // Coming out of invisibility: say so, and show everyone where we are now
+    // rather than leaving them looking at where we went invisible. The ping
+    // waits a moment in case this phone's clock is a little ahead of the
+    // server's, which would still have us down as invisible.
+    if (this.wasInvisible && !shield.invisible) {
+      UI.showNotification("You're visible again - everyone can see where you are.", "warning");
+
+      setTimeout(() => {
+        if (GameMap.currentLocation) {
+          this.emitLocationUpdate(GameMap.currentLocation.lat, GameMap.currentLocation.lng);
+        }
+      }, 3000);
+    }
+    this.wasInvisible = shield.invisible;
+
+    if (shield.invisible) {
+      value.textContent = `👻 ${zoneUtils.formatCountdown(shield.invisibleMsRemaining)}`;
+      value.classList.add("shield-invisible");
+    } else if (shield.immune) {
       value.textContent = `🛡 ${zoneUtils.formatCountdown(shield.immuneMsRemaining)}`;
       value.classList.add("shield-immune");
     } else if (shield.hasShield) {
@@ -471,6 +496,7 @@ const Game = {
     }
 
     this.running = false;
+    this.wasInvisible = false;
   },
 
   // End the game

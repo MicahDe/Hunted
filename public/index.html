@@ -146,6 +146,34 @@
               </div>
             </div>
             <div class="form-group">
+              <label for="shield-zones">Shields Last (zones)</label>
+              <input
+                type="number"
+                id="shield-zones"
+                min="0"
+                max="6"
+                value="2"
+                required
+              />
+              <div class="location-info">
+                <span id="shield-zones-hint">Every Runner loses their shield when this many zones have closed</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="invisibility">Invisibility (minutes)</label>
+              <input
+                type="number"
+                id="invisibility"
+                min="0"
+                max="30"
+                value="3"
+                required
+              />
+              <div class="location-info">
+                <span>How long a Runner who still has their shield when shields run out goes invisible: nobody else is shown where they are</span>
+              </div>
+            </div>
+            <div class="form-group">
               <label>Target Area</label>
               <div id="setup-map" class="setup-map"></div>
               <div class="location-info">
@@ -267,8 +295,16 @@
                 <span id="zone-lock-display">First 3 min of each</span>
               </div>
               <div class="setting-item">
+                <span class="setting-label">Shields:</span>
+                <span id="shield-zones-display">First 2 zones</span>
+              </div>
+              <div class="setting-item">
                 <span class="setting-label">Shield Immunity:</span>
                 <span id="catch-immunity-display">3 min</span>
+              </div>
+              <div class="setting-item">
+                <span class="setting-label">Invisibility:</span>
+                <span id="invisibility-display">3 min</span>
               </div>
               <div class="setting-item">
                 <span class="setting-label">Target Area:</span>
@@ -278,10 +314,11 @@
           </div>
           <div class="lobby-section">
             <h3>Shields</h3>
-            <p class="lobby-note">
-              Every Runner starts with one shield - a dog's life. Miss a zone's window or get caught
-              and it takes the hit; the second time either happens, you are out and join the Hunters.
-              A shield spent on a catch also makes you immune to being caught again for a few minutes.
+            <p class="lobby-note" id="shield-rules-note">
+              Every Runner starts with one shield against the Hunters. The first catch takes it and makes
+              you immune for a few minutes; the second puts you out. Shields only last the first few zones.
+              Keep yours until they run out and you go invisible for a few minutes. Missing a zone always
+              puts you out, shield or not.
             </p>
           </div>
           <div class="lobby-section">

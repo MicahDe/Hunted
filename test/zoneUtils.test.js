@@ -5,7 +5,7 @@
  * a 60 minute game over six zones gives zone 1 the window from minute 0-10 and
  * the final zone 50-60, each locked for the start of its window. These tests
  * pin down that arithmetic, including the boundaries either side of a window,
- * since a zone closing is what costs a runner a life.
+ * since a zone closing is what puts a runner out, and when shields run out.
  */
 
 const test = require("node:test");
@@ -142,7 +142,7 @@ test("a zone is locked before its window, open during it and closed after", () =
 
 test("shield state reads as shielded, immune or neither", () => {
   const shielded = zoneUtils.shieldState({ shieldActive: 1, immunityUntil: null }, START);
-  assert.deepStrictEqual(shielded, { hasShield: true, immune: false, immuneMsRemaining: 0 });
+  assert.deepStrictEqual(shielded, { hasShield: true, immune: false, immuneMsRemaining: 0, invisible: false, invisibleMsRemaining: 0 });
 
   const immune = zoneUtils.shieldState({ shieldActive: 0, immunityUntil: START + 2 * MINUTE }, START);
   assert.strictEqual(immune.hasShield, false);
@@ -153,6 +153,29 @@ test("shield state reads as shielded, immune or neither", () => {
   const expired = zoneUtils.shieldState({ shieldActive: 0, immunityUntil: START - 1 }, START);
   assert.strictEqual(expired.immune, false);
   assert.strictEqual(expired.immuneMsRemaining, 0);
+});
+
+test("a runner who kept their shield reads as invisible until their spell runs out", () => {
+  const invisible = zoneUtils.shieldState({ shieldActive: 0, immunityUntil: null, invisibleUntil: START + 3 * MINUTE }, START);
+  assert.strictEqual(invisible.hasShield, false);
+  assert.strictEqual(invisible.invisible, true);
+  assert.strictEqual(invisible.invisibleMsRemaining, 3 * MINUTE);
+
+  const visibleAgain = zoneUtils.shieldState({ shieldActive: 0, immunityUntil: null, invisibleUntil: START }, START);
+  assert.strictEqual(visibleAgain.invisible, false);
+});
+
+test("shields run out when the last zone they cover closes", () => {
+  // The default two zones in a 60 minute game: minute 20
+  assert.strictEqual(zoneUtils.shieldDeadline(START, WINDOW, ZONE_COUNT, 2), START + 20 * MINUTE);
+  assert.strictEqual(zoneUtils.shieldDeadline(START, WINDOW, ZONE_COUNT, 2), zoneUtils.zoneWindow(1, START, WINDOW).closeTime);
+  assert.strictEqual(zoneUtils.shieldDeadline(START, WINDOW, ZONE_COUNT, 5), START + 50 * MINUTE);
+});
+
+test("shields never run out mid-game when there are none, or they cover every zone", () => {
+  assert.strictEqual(zoneUtils.shieldDeadline(START, WINDOW, ZONE_COUNT, 0), null);
+  assert.strictEqual(zoneUtils.shieldDeadline(START, WINDOW, ZONE_COUNT, ZONE_COUNT), null);
+  assert.strictEqual(zoneUtils.shieldDeadline(null, WINDOW, ZONE_COUNT, 2), null, "nor before the game has started");
 });
 
 test("countdowns read as MM:SS and never go negative", () => {
