@@ -28,6 +28,9 @@ const GameMap = {
   targetCircles: {},
   boundaryCircle: null,
 
+  // Whether the zone circle on the map was drawn locked, open or closed
+  drawnZoneStatus: null,
+
   // Store current location
   currentLocation: null,
   selectedLocation: null,
@@ -261,6 +264,7 @@ const GameMap = {
     this.runnerLabels = {};
     this.runnerTrails = {};
     this.targetCircles = {};
+    this.drawnZoneStatus = null;
     this.boundaryCircle = null;
     this.playerDataCache = {};
 
@@ -849,6 +853,7 @@ const GameMap = {
       this.gameMap.removeLayer(this.targetCircles[targetId]);
       delete this.targetCircles[targetId];
     });
+    this.drawnZoneStatus = null;
 
     if (playerTeam !== "runner") return;
 
@@ -857,8 +862,10 @@ const GameMap = {
     if (!zone) return;
 
     // A zone can only be captured inside its own window, so its colour says
-    // whether it is worth running for right now
-    const zoneStatus = zone.zoneStatus || "open";
+    // whether it is worth running for right now. Worked out from the clock
+    // rather than taken from the game state, since a zone unlocks partway
+    // through its window without the server saying anything.
+    const zoneStatus = zone.windowOpenTime && zone.windowCloseTime ? zoneUtils.zoneStatusAt(Date.now(), { openTime: zone.windowOpenTime, closeTime: zone.windowCloseTime }) : zone.zoneStatus || "open";
     const isOpen = zoneStatus === "open";
     const circleColor = isOpen ? "#4caf50" : zoneStatus === "locked" ? "#ffeb3b" : "#ef7d54";
 
@@ -871,6 +878,7 @@ const GameMap = {
       dashArray: isOpen ? null : "5, 5",
       className: `map-circle-target map-circle-zone-${zoneStatus}`,
     }).addTo(this.gameMap);
+    this.drawnZoneStatus = zoneStatus;
   },
 
   // Shields are public, so the map can show who still has one and who is

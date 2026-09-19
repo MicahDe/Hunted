@@ -2,11 +2,13 @@
  * Zone scheduling and shield state for HUNTED Game
  *
  * Zones run on the game clock rather than on each runner's own progress: the
- * game is split into one equal window per zone, so in a 60 minute game with six
- * zones, zone 1 is capturable from minute 0 to 10, zone 2 from 10 to 20, and the
- * final zone from 50 to 60. A runner who doesn't ping inside a zone before its
- * window closes loses a life, and the whole field moves on to the next zone
- * together.
+ * game is split into one equal window per zone, and each window opens with a
+ * spell where its zone is locked. So in a 60 minute game with six zones and a
+ * 3 minute lock, zone 1 is capturable from minute 3 to 10, zone 2 from 13 to
+ * 20, and the final zone from 53 to 60. The lock stops a runner capturing zone
+ * 1 the moment the game starts, or two zones back to back across a window
+ * boundary. A runner who doesn't ping inside a zone before its window closes
+ * loses a life, and the whole field moves on to the next zone together.
  *
  * Every runner starts with one shield - a dog's life shared between missing a
  * zone and being caught. The first of either costs the shield; the second puts
@@ -26,15 +28,31 @@ function zoneWindowMs(gameDurationMinutes, zoneCount) {
 }
 
 /**
- * The window a zone owns
+ * How long each zone stays locked at the start of its window. Never more than
+ * half the window, so a short game still leaves each zone open for at least as
+ * long as it was locked, and always whole minutes so it reads cleanly.
+ * @param {number} lockMinutes - The lock the host asked for
+ * @param {number} windowMs - Length of a single zone window (see zoneWindowMs)
+ */
+function zoneLockMs(lockMinutes, windowMs) {
+  const requested = Math.max(0, Number(lockMinutes) || 0) * 60 * 1000;
+  const cap = Math.floor(windowMs / 2 / (60 * 1000)) * 60 * 1000;
+
+  return Math.min(requested, cap);
+}
+
+/**
+ * The part of its window a zone can be captured in: from the end of the lock
+ * to the end of the window
  * @param {number} zoneIndex - 0-based zone index
  * @param {number} gameStartTime - When the game started, in milliseconds
  * @param {number} windowMs - Length of a single zone window (see zoneWindowMs)
+ * @param {number} [lockMs] - How long the zone is locked first (see zoneLockMs)
  * @returns {{openTime: number, closeTime: number}}
  */
-function zoneWindow(zoneIndex, gameStartTime, windowMs) {
-  const openTime = gameStartTime + zoneIndex * windowMs;
-  return { openTime, closeTime: openTime + windowMs };
+function zoneWindow(zoneIndex, gameStartTime, windowMs, lockMs = 0) {
+  const windowStart = gameStartTime + zoneIndex * windowMs;
+  return { openTime: windowStart + lockMs, closeTime: windowStart + windowMs };
 }
 
 /**
@@ -56,7 +74,7 @@ function gameEndTime(gameStartTime, windowMs, zoneCount) {
 
 /**
  * Where a zone is in its window
- * @returns {"locked"|"open"|"closed"} Locked before the window opens, open while
+ * @returns {"locked"|"open"|"closed"} Locked until its lock runs out, open while
  *   it can be captured, closed once the window has passed
  */
 function zoneStatusAt(now, window) {
@@ -96,6 +114,7 @@ const zoneUtils = {
   DEFAULT_RADIUS_LEVELS,
   DEFAULT_ZONE_OVERHANG,
   zoneWindowMs,
+  zoneLockMs,
   zoneWindow,
   currentZoneIndex,
   gameEndTime,

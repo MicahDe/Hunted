@@ -2,10 +2,10 @@
  * Tests for the zone clock.
  *
  * Zones used to unlock on a per-runner delay; now they run on the game clock, so
- * a 60 minute game over six zones puts zone 1 in minutes 0-10 and the final zone
- * in minutes 50-60. These tests pin down that arithmetic, including the
- * boundaries either side of a window, since a zone closing is what costs a
- * runner a life.
+ * a 60 minute game over six zones gives zone 1 the window from minute 0-10 and
+ * the final zone 50-60, each locked for the start of its window. These tests
+ * pin down that arithmetic, including the boundaries either side of a window,
+ * since a zone closing is what costs a runner a life.
  */
 
 const test = require("node:test");
@@ -74,8 +74,64 @@ test("a game state from before kick-off sits on the first zone", () => {
   assert.strictEqual(zoneUtils.currentZoneIndex(START - MINUTE, START, WINDOW, ZONE_COUNT), 0);
 });
 
+test("with a 3 minute lock, zone 1 opens at minute 3, zone 2 at 13 and zone 3 at 23", () => {
+  const lock = zoneUtils.zoneLockMs(3, WINDOW);
+  assert.strictEqual(lock, 3 * MINUTE);
+
+  const windows = [0, 1, 2, ZONE_COUNT - 1].map((index) => zoneUtils.zoneWindow(index, START, WINDOW, lock));
+  const minutes = windows.map((window) => [(window.openTime - START) / MINUTE, (window.closeTime - START) / MINUTE]);
+
+  assert.deepStrictEqual(minutes, [
+    [3, 10],
+    [13, 20],
+    [23, 30],
+    [53, 60],
+  ]);
+});
+
+test("the lock doesn't move when a window closes, or when the game ends", () => {
+  const lock = zoneUtils.zoneLockMs(3, WINDOW);
+  const at = (minutes) => zoneUtils.currentZoneIndex(START + minutes * MINUTE, START, WINDOW, ZONE_COUNT);
+
+  // Zone 2's window starts at minute 10, locked or not
+  assert.strictEqual(at(10), 1);
+  assert.strictEqual(zoneUtils.zoneStatusAt(START + 10 * MINUTE, zoneUtils.zoneWindow(1, START, WINDOW, lock)), "locked");
+  assert.strictEqual(zoneUtils.gameEndTime(START, WINDOW, ZONE_COUNT), START + 60 * MINUTE);
+});
+
+test("two zones can't be captured back to back across a window boundary", () => {
+  const lock = zoneUtils.zoneLockMs(3, WINDOW);
+  const zone2 = zoneUtils.zoneWindow(1, START, WINDOW, lock);
+  const zone3 = zoneUtils.zoneWindow(2, START, WINDOW, lock);
+
+  // The last moment zone 2 is open and the first moment zone 3 is are a full lock apart
+  assert.strictEqual(zone3.openTime - zone2.closeTime, 3 * MINUTE);
+  assert.strictEqual(zoneUtils.zoneStatusAt(zone2.closeTime, zone3), "locked");
+});
+
+test("no lock leaves each zone open for its whole window", () => {
+  const window = zoneUtils.zoneWindow(2, START, WINDOW, zoneUtils.zoneLockMs(0, WINDOW));
+
+  assert.strictEqual(window.openTime, START + 20 * MINUTE);
+  assert.strictEqual(window.closeTime, START + 30 * MINUTE);
+
+  // And leaving the lock out altogether is the same as no lock
+  assert.deepStrictEqual(zoneUtils.zoneWindow(2, START, WINDOW), window);
+});
+
+test("a zone is never locked for more than half its window", () => {
+  // A 30 minute game has 5 minute windows, so a 3 minute lock is cut to 2
+  assert.strictEqual(zoneUtils.zoneLockMs(3, zoneUtils.zoneWindowMs(30, ZONE_COUNT)), 2 * MINUTE);
+
+  // A 6 minute test game has 1 minute windows, which leaves no room for a lock
+  assert.strictEqual(zoneUtils.zoneLockMs(3, zoneUtils.zoneWindowMs(6, ZONE_COUNT)), 0);
+
+  // Plenty of room in a long game
+  assert.strictEqual(zoneUtils.zoneLockMs(3, zoneUtils.zoneWindowMs(120, ZONE_COUNT)), 3 * MINUTE);
+});
+
 test("a zone is locked before its window, open during it and closed after", () => {
-  const window = zoneUtils.zoneWindow(2, START, WINDOW);
+  const window = zoneUtils.zoneWindow(2, START, WINDOW, 3 * MINUTE);
 
   assert.strictEqual(zoneUtils.zoneStatusAt(START, window), "locked");
   assert.strictEqual(zoneUtils.zoneStatusAt(window.openTime - 1, window), "locked");

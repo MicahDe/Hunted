@@ -345,8 +345,15 @@ const Game = {
     const status = zoneUtils.zoneStatusAt(now, { openTime: target.windowOpenTime, closeTime: target.windowCloseTime });
     zoneValue.classList.remove("zone-open", "zone-locked", "zone-closing", "zone-captured");
 
+    // The zone's circle is coloured by the same clock, so redraw it the moment
+    // the zone unlocks or its window closes
+    if (status !== GameMap.drawnZoneStatus) {
+      GameMap.updateTargets(this.gameState.targets, this.playerInfo.team);
+    }
+
     if (status === "locked") {
-      // They captured their last zone, so this one is revealed but not yet open
+      // The zone is locked for the start of its window, or has been revealed
+      // early by capturing the one before
       zoneValue.textContent = `🔒 ${zoneUtils.formatCountdown(target.windowOpenTime - now)}`;
       zoneValue.classList.add("zone-locked");
       return;

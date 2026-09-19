@@ -72,6 +72,7 @@ const UI = {
     // Reset form fields
     document.getElementById("room-name").value = "";
     document.getElementById("game-duration").value = 60;
+    document.getElementById("zone-lock").value = 3;
     document.getElementById("catch-immunity").value = 3;
     this.updateZoneWindowHint();
 
@@ -90,10 +91,12 @@ const UI = {
     }, 100);
   },
 
-  // Spell out what the chosen game duration means for the zone windows: a 60
-  // minute game over six zones opens a zone every 10 minutes
+  // Spell out what the chosen game duration and zone lock mean for the zone
+  // windows: a 60 minute game over six zones with a 3 minute lock gives a zone
+  // every 10 minutes, each open for the last 7
   updateZoneWindowHint: function () {
     const durationInput = document.getElementById("game-duration");
+    const lockInput = document.getElementById("zone-lock");
     const hint = document.getElementById("zone-window-hint");
     if (!durationInput || !hint) return;
 
@@ -105,8 +108,21 @@ const UI = {
       return;
     }
 
-    const windowMinutes = Math.round(zoneUtils.zoneWindowMs(duration, zoneCount) / 60000);
-    hint.textContent = `${zoneCount} zones, one capturable every ${windowMinutes} min`;
+    const windowMs = zoneUtils.zoneWindowMs(duration, zoneCount);
+    const requestedLock = lockInput ? parseInt(lockInput.value, 10) || 0 : 0;
+    const lockMs = zoneUtils.zoneLockMs(requestedLock, windowMs);
+    const windowMinutes = Math.round(windowMs / 60000);
+
+    if (lockMs <= 0) {
+      const dropped = requestedLock > 0 ? " (too short a window for a lock)" : "";
+      hint.textContent = `${zoneCount} zones, one capturable every ${windowMinutes} min${dropped}`;
+      return;
+    }
+
+    const lockMinutes = lockMs / 60000;
+    const openMinutes = Math.round((windowMs - lockMs) / 60000);
+    const capped = lockMinutes < requestedLock ? " (at most half the window)" : "";
+    hint.textContent = `${zoneCount} zones, one every ${windowMinutes} min: locked for ${lockMinutes}${capped}, then open for ${openMinutes}`;
   },
 
   // Initialize the join room screen

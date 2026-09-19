@@ -15,6 +15,7 @@ function initDatabase(db) {
             host_player_id TEXT,
             game_duration INTEGER,
             catch_immunity INTEGER,
+            zone_lock INTEGER,
             game_start_time INTEGER,
             final_lat REAL,
             final_lng REAL,
@@ -103,6 +104,7 @@ function initDatabase(db) {
       columns: {
         game_duration: "INTEGER",
         catch_immunity: "INTEGER",
+        zone_lock: "INTEGER",
         game_start_time: "INTEGER",
         final_lat: "REAL",
         final_lng: "REAL",

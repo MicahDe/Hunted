@@ -95,6 +95,7 @@ module.exports = function (io, db) {
           await createRoom(roomId, roomName, playerId, {
             gameDuration: data.gameDuration,
             catchImmunity: data.catchImmunity,
+            zoneLock: data.zoneLock,
             centralLat,
             centralLng,
             targetRadius: data.targetRadius,
@@ -973,12 +974,13 @@ module.exports = function (io, db) {
   async function createRoom(roomId, roomName, hostPlayerId, settings) {
     const gameDuration = clamp(settings.gameDuration, 6, 240, config.game.defaultGameDuration);
     const catchImmunity = clamp(settings.catchImmunity, 0, 30, config.game.defaultCatchImmunity);
+    const zoneLock = clamp(settings.zoneLock, 0, 30, config.game.defaultZoneLock);
     const targetRadius = clamp(settings.targetRadius, 100, 5000, config.game.defaultTargetAreaRadius);
 
     await new Promise((resolve, reject) => {
       db.run(
-        "INSERT INTO rooms (room_id, room_name, host_player_id, game_duration, catch_immunity, central_lat, central_lng, target_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [roomId, roomName, hostPlayerId, gameDuration, catchImmunity, settings.centralLat, settings.centralLng, targetRadius, Date.now(), "lobby"],
+        "INSERT INTO rooms (room_id, room_name, host_player_id, game_duration, catch_immunity, zone_lock, central_lat, central_lng, target_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [roomId, roomName, hostPlayerId, gameDuration, catchImmunity, zoneLock, settings.centralLat, settings.centralLng, targetRadius, Date.now(), "lobby"],
         function (err) {
           if (err) reject(err);
           resolve(this.lastID);
@@ -986,7 +988,7 @@ module.exports = function (io, db) {
       );
     });
 
-    return { gameDuration, catchImmunity };
+    return { gameDuration, catchImmunity, zoneLock };
   }
 
   // Set the game running, and with it the clock every zone window is measured
@@ -1212,6 +1214,7 @@ module.exports = function (io, db) {
     const zoneCount = radiusLevels.length;
     const gameDuration = room.game_duration || config.game.defaultGameDuration;
     const windowMs = zoneUtils.zoneWindowMs(gameDuration, zoneCount);
+    const lockMs = zoneUtils.zoneLockMs(room.zone_lock == null ? config.game.defaultZoneLock : room.zone_lock, windowMs);
     const catchImmunity = room.catch_immunity == null ? config.game.defaultCatchImmunity : room.catch_immunity;
 
     // Null until the game is started. A room from before zone windows existed
@@ -1225,6 +1228,7 @@ module.exports = function (io, db) {
       zoneCount,
       gameDuration,
       windowMs,
+      lockMs,
       gameStartTime,
       gameEndTime: gameStartTime ? zoneUtils.gameEndTime(gameStartTime, windowMs, zoneCount) : null,
       catchImmunity,
@@ -1314,6 +1318,7 @@ module.exports = function (io, db) {
         missedZoneNumber,
         zoneNumber: zoneIndex + 1,
         targetId: target.target_id,
+        windowOpenTime: target.activation_time,
         timestamp: Date.now(),
       });
     }
@@ -1371,9 +1376,9 @@ module.exports = function (io, db) {
     return { outcome: "eliminated" };
   }
 
-  // Move a runner on to the given zone, locked until that zone's window opens
+  // Move a runner on to the given zone, locked until its window's lock runs out
   async function moveTargetToZone(target, zoneIndex, schedule) {
-    const window = zoneUtils.zoneWindow(zoneIndex, schedule.gameStartTime, schedule.windowMs);
+    const window = zoneUtils.zoneWindow(zoneIndex, schedule.gameStartTime, schedule.windowMs, schedule.lockMs);
     const radiusLevel = schedule.radiusLevels[zoneIndex];
 
     await new Promise((resolve, reject) => {
@@ -1747,6 +1752,7 @@ module.exports = function (io, db) {
         catchImmunity: schedule.catchImmunity,
         zoneCount: schedule.zoneCount,
         zoneWindowMs: schedule.windowMs,
+        zoneLockMs: schedule.lockMs,
         zoneRadiusLevels: schedule.radiusLevels,
         gameStartTime: schedule.gameStartTime,
         gameEndTime: schedule.gameEndTime,
@@ -1826,11 +1832,11 @@ module.exports = function (io, db) {
     }
 
     // Capturing a zone reveals the next one straight away so the runner can
-    // start moving, though it stays locked until its own window opens
+    // start moving, though it stays locked until its own window's lock runs out
     const nextIndex = zoneIndex + 1;
     await moveTargetToZone(target, nextIndex, schedule);
 
-    const nextWindow = zoneUtils.zoneWindow(nextIndex, schedule.gameStartTime, schedule.windowMs);
+    const nextWindow = zoneUtils.zoneWindow(nextIndex, schedule.gameStartTime, schedule.windowMs, schedule.lockMs);
 
     const nextZone = targetZone(target, nextIndex);
 
@@ -1933,7 +1939,7 @@ module.exports = function (io, db) {
     // Start on whatever zone the clock is on, so a runner who joins late isn't
     // handed a window that closed before they arrived
     const zoneIndex = Math.min(schedule.zoneCount - 1, zoneUtils.currentZoneIndex(Date.now(), schedule.gameStartTime, schedule.windowMs, schedule.zoneCount));
-    const window = zoneUtils.zoneWindow(zoneIndex, schedule.gameStartTime, schedule.windowMs);
+    const window = zoneUtils.zoneWindow(zoneIndex, schedule.gameStartTime, schedule.windowMs, schedule.lockMs);
     const targetId = uuidv4();
 
     await new Promise((resolve, reject) => {

@@ -118,6 +118,20 @@
               </div>
             </div>
             <div class="form-group">
+              <label for="zone-lock">Zone Lock (minutes)</label>
+              <input
+                type="number"
+                id="zone-lock"
+                min="0"
+                max="30"
+                value="3"
+                required
+              />
+              <div class="location-info">
+                <span>How long each zone stays locked at the start of its window, so nobody can capture one the moment it appears</span>
+              </div>
+            </div>
+            <div class="form-group">
               <label for="catch-immunity">Shield Immunity (minutes)</label>
               <input
                 type="number"
@@ -247,6 +261,10 @@
               <div class="setting-item">
                 <span class="setting-label">Zone Windows:</span>
                 <span id="zone-window-display">6 zones, 10 min each</span>
+              </div>
+              <div class="setting-item">
+                <span class="setting-label">Zone Lock:</span>
+                <span id="zone-lock-display">First 3 min of each</span>
               </div>
               <div class="setting-item">
                 <span class="setting-label">Shield Immunity:</span>

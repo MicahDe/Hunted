@@ -148,8 +148,12 @@ function setupAllEventListeners() {
     GameMap.centerOnPlayer();
   });
 
-  // Spell out the zone windows as the host picks a game length
+  // Spell out the zone windows as the host picks a game length and zone lock
   document.getElementById("game-duration").addEventListener("input", () => {
+    UI.updateZoneWindowHint();
+  });
+
+  document.getElementById("zone-lock").addEventListener("input", () => {
     UI.updateZoneWindowHint();
   });
 
@@ -323,6 +327,7 @@ function createRoom() {
   const roomName = document.getElementById("room-name").value.trim();
   const username = document.getElementById("creator-username").value.trim();
   const gameDuration = parseInt(document.getElementById("game-duration").value);
+  const zoneLock = parseInt(document.getElementById("zone-lock").value);
   const catchImmunity = parseInt(document.getElementById("catch-immunity").value);
   const targetRadius = parseInt(document.getElementById("target-radius").value);
   const teamBtn = document.querySelector("#create-room-form .team-btn.selected");
@@ -355,6 +360,7 @@ function createRoom() {
     username,
     team,
     gameDuration,
+    zoneLock,
     catchImmunity,
     targetRadius,
     centralLat: location.lat,
@@ -491,6 +497,12 @@ function updateLobbyUI(state) {
   const windowElement = document.getElementById("zone-window-display");
   if (windowElement && state.zoneCount && state.zoneWindowMs) {
     windowElement.textContent = `${state.zoneCount} zones, ${Math.round(state.zoneWindowMs / 60000)} min each`;
+  }
+
+  // Each zone is locked for the start of its window
+  const lockElement = document.getElementById("zone-lock-display");
+  if (lockElement && state.zoneLockMs != null) {
+    lockElement.textContent = state.zoneLockMs > 0 ? `First ${state.zoneLockMs / 60000} min of each` : "None";
   }
 
   const immunityElement = document.getElementById("catch-immunity-display");
@@ -722,7 +734,9 @@ function handleZoneCaptured(data) {
 // arrives separately as shield_lost or runner_caught.
 function handleZoneMissed(data) {
   console.log("Zone missed:", data);
-  UI.showNotification(`Zone ${data.missedZoneNumber} closed. Zone ${data.zoneNumber} is open now.`, "warning");
+  const opensIn = data.windowOpenTime - Date.now();
+  const next = opensIn > 0 ? `opens in ${zoneUtils.formatCountdown(opensIn)}` : "is open now";
+  UI.showNotification(`Zone ${data.missedZoneNumber} closed. Zone ${data.zoneNumber} ${next}.`, "warning");
 }
 
 // Shields are public, so everyone hears when one is spent

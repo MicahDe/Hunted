@@ -23,8 +23,16 @@ module.exports = {
 
     // Default game duration in minutes. The game is split into one equal zone
     // window per radius level, so 60 minutes over 6 zones gives a zone every 10
-    // minutes: zone 1 from 0-10, zone 2 from 10-20, the last from 50-60.
+    // minutes: zone 1's window is 0-10, zone 2's 10-20, the last one's 50-60.
     defaultGameDuration: 60,
+
+    // How long each zone is locked at the start of its window, in minutes, so
+    // with the defaults zone 1 is capturable from minute 3-10, zone 2 from
+    // 13-20 and the last from 53-60. Stops runners capturing zone 1 the moment
+    // the game starts, or two zones back to back across a window boundary.
+    // Configurable per room at setup, and never more than half a window (see
+    // zoneUtils.zoneLockMs).
+    defaultZoneLock: 3,
 
     // Zone radii in meters, one per zone, largest first, closing from a first
     // zone a runner has to walk across to a final zone they have to stand in

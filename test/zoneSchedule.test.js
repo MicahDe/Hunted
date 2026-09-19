@@ -3,7 +3,8 @@
  * against an in-memory database.
  *
  * The rules being pinned down: a zone can only be captured inside its own
- * window, a window that closes uncaptured costs the runner their shield, and a
+ * window, and not until the lock at the start of that window has run out; a
+ * window that closes uncaptured costs the runner their shield, and a
  * catch costs the same single shield - so the second of either, in any order,
  * puts a runner out. Spending the shield on a catch also buys a spell of
  * immunity, which the server, not the client, has to enforce.
@@ -29,7 +30,7 @@ const CENTRE = { lat: 51.5074, lng: -0.1278 };
  * Time is moved by rewriting the room's start time rather than by waiting, so a
  * test can put the clock 25 minutes into a 60 minute game.
  */
-async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration = 60, catchImmunity = 3 } = {}) {
+async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration = 60, zoneLock = 3, catchImmunity = 3 } = {}) {
   const db = new sqlite3.Database(":memory:");
   initDatabase(db);
 
@@ -99,6 +100,7 @@ async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration
     username: hunters[0],
     team: "hunter",
     gameDuration,
+    zoneLock,
     catchImmunity,
     targetRadius: 500,
     centralLat: CENTRE.lat,
@@ -147,6 +149,7 @@ async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration
       await run("UPDATE rooms SET game_start_time = ? WHERE room_id = ?", [Date.now() - minutes * MINUTE, roomId]);
       const room = await get("SELECT * FROM rooms WHERE room_id = ?", [roomId]);
       const windowMs = zoneUtils.zoneWindowMs(room.game_duration, ZONE_COUNT);
+      const lockMs = zoneUtils.zoneLockMs(room.zone_lock, windowMs);
 
       // Targets carry their own window, so move those with the clock
       const targets = await new Promise((resolve, reject) => {
@@ -154,7 +157,7 @@ async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration
       });
 
       for (const target of targets) {
-        const window = zoneUtils.zoneWindow(target.zone_index || 0, room.game_start_time, windowMs);
+        const window = zoneUtils.zoneWindow(target.zone_index || 0, room.game_start_time, windowMs, lockMs);
         await run("UPDATE targets SET activation_time = ?, window_close_time = ? WHERE target_id = ?", [window.openTime, window.closeTime, target.target_id]);
       }
     },
@@ -262,6 +265,7 @@ test("the final zone is revealed to everyone once the game is over", async () =>
 
 test("a runner has to be inside their own zone, not just near the final one", async () => {
   const game = await createGame();
+  await game.setElapsed(4);
 
   const zones = JSON.parse((await game.target("Ruby")).zones);
   const outside = geoUtils.calculateDestination(zones[0].lat, zones[0].lng, 90, zones[0].radius + 100);
@@ -275,28 +279,96 @@ test("a runner has to be inside their own zone, not just near the final one", as
   assert.strictEqual((await game.target("Ruby")).zone_index, 1, "a ping inside it captures the zone");
 });
 
-test("every runner starts the game with a shield and the first zone open", async () => {
+test("every runner starts the game with a shield and zone 1 locked for the first 3 minutes", async () => {
   const game = await createGame();
 
   const runner = await game.player("Ruby");
   assert.strictEqual(runner.shield_active, 1);
   assert.strictEqual(runner.immunity_until, null);
 
+  const room = await game.room();
   const target = await game.target("Ruby");
   assert.strictEqual(target.zone_index, 0);
   assert.strictEqual(target.radius_level, config.game.targetRadiusLevels[0]);
-  assert.strictEqual(zoneUtils.zoneStatusAt(Date.now(), { openTime: target.activation_time, closeTime: target.window_close_time }), "open");
+  assert.strictEqual(target.activation_time, room.game_start_time + 3 * MINUTE, "zone 1 opens at minute 3");
+  assert.strictEqual(target.window_close_time, room.game_start_time + 10 * MINUTE, "and closes at minute 10");
+  assert.strictEqual(zoneUtils.zoneStatusAt(Date.now(), { openTime: target.activation_time, closeTime: target.window_close_time }), "locked");
+});
+
+test("zone 1 can't be captured the moment the game starts, only once its lock runs out", async () => {
+  const game = await createGame();
+
+  await game.pingInsideZone("Ruby");
+  assert.strictEqual((await game.target("Ruby")).zone_index, 0, "standing in zone 1 at kick-off captures nothing");
+  assert.strictEqual(game.players.Ruby.socket.received("zone_captured").length, 0);
+
+  await game.setElapsed(3);
+  await game.pingInsideZone("Ruby");
+  assert.strictEqual((await game.target("Ruby")).zone_index, 1, "at minute 3 it can be captured");
+});
+
+test("zones 2 and 3 can't be captured one straight after the other", async () => {
+  const game = await createGame();
+
+  await game.setElapsed(4);
+  await game.pingInsideZone("Ruby");
+
+  // Capture zone 2 in the last minute of its window, then walk into zone 3
+  await game.setElapsed(19);
+  await game.pingInsideZone("Ruby");
+  assert.strictEqual((await game.target("Ruby")).zone_index, 2);
+
+  // Zone 3's window has started, but it is still locked
+  await game.setElapsed(21);
+  await game.manager.processZoneSchedules();
+  await game.pingInsideZone("Ruby");
+  assert.strictEqual((await game.target("Ruby")).zone_index, 2, "zone 3 is locked until minute 23");
+  assert.strictEqual((await game.player("Ruby")).shield_active, 1, "waiting out a lock costs nothing");
+
+  await game.setElapsed(23);
+  await game.pingInsideZone("Ruby");
+  assert.strictEqual((await game.target("Ruby")).zone_index, 3);
+});
+
+test("the host's zone lock is kept with the room and sent to everyone", async () => {
+  const game = await createGame({ zoneLock: 5 });
+  assert.strictEqual((await game.room()).zone_lock, 5);
+
+  game.players.Hank.socket.fire("resync_game_state", { roomId: game.roomId });
+  await settle();
+  assert.strictEqual(game.players.Hank.socket.lastState().zoneLockMs, 5 * MINUTE);
+});
+
+test("a lock longer than half a window is cut down to half", async () => {
+  // 30 minute game, so 5 minute windows
+  const game = await createGame({ gameDuration: 30, zoneLock: 4 });
+  const room = await game.room();
+  const target = await game.target("Ruby");
+
+  assert.strictEqual(target.activation_time, room.game_start_time + 2 * MINUTE);
+
+  game.players.Hank.socket.fire("resync_game_state", { roomId: game.roomId });
+  await settle();
+  assert.strictEqual(game.players.Hank.socket.lastState().zoneLockMs, 2 * MINUTE);
+});
+
+test("with no zone lock, zone 1 is open from the start", async () => {
+  const game = await createGame({ zoneLock: 0 });
+
+  await game.pingInsideZone("Ruby");
+  assert.strictEqual((await game.target("Ruby")).zone_index, 1);
 });
 
 test("capturing a zone in its window reveals the next one, locked until its own window", async () => {
   const game = await createGame();
 
+  await game.setElapsed(4);
   await game.pingInsideZone("Ruby");
 
   const target = await game.target("Ruby");
   assert.strictEqual(target.zone_index, 1, "the next zone should be revealed straight away");
   assert.strictEqual(target.radius_level, config.game.targetRadiusLevels[1]);
-  assert.strictEqual(zoneUtils.zoneStatusAt(Date.now(), { openTime: target.activation_time, closeTime: target.window_close_time }), "locked", "zone 2 is not capturable until minute 10");
+  assert.strictEqual(zoneUtils.zoneStatusAt(Date.now(), { openTime: target.activation_time, closeTime: target.window_close_time }), "locked", "zone 2 is not capturable until minute 13");
 
   const captured = game.players.Ruby.socket.received("zone_captured");
   assert.strictEqual(captured.length, 1);
@@ -308,6 +380,7 @@ test("being in the right place at the wrong time captures nothing", async () => 
   const game = await createGame();
 
   // Capture zone 1, then sit inside zone 2 before its window opens
+  await game.setElapsed(4);
   await game.pingInsideZone("Ruby");
   await game.pingInsideZone("Ruby");
 
@@ -339,6 +412,14 @@ test("a zone window closing uncaptured costs the shield, not the game", async ()
   const target = await game.target("Ruby");
   assert.strictEqual(target.zone_index, 1);
   assert.strictEqual(target.radius_level, config.game.targetRadiusLevels[1]);
+
+  // Which is still in its lock, and they are told when it opens
+  const room = await game.room();
+  assert.strictEqual(target.activation_time, room.game_start_time + 13 * MINUTE);
+
+  const missed = game.players.Ruby.socket.received("zone_missed");
+  assert.strictEqual(missed.length, 1);
+  assert.strictEqual(missed[0].payload.windowOpenTime, target.activation_time);
 });
 
 test("a second missed zone puts a runner out and onto the hunters", async () => {
@@ -363,6 +444,7 @@ test("a second missed zone puts a runner out and onto the hunters", async () => 
 test("a runner who captured their zone keeps their shield when the window rolls over", async () => {
   const game = await createGame();
 
+  await game.setElapsed(4);
   await game.pingInsideZone("Ruby");
   await game.setElapsed(11);
   await game.manager.processZoneSchedules();

@@ -33,11 +33,12 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 - This makes the game about staying hidden nearby rather than traveling long distances, and about everyone converging on one place at the end
 
 **Zone Windows:**
-- The game duration is split evenly into one window per zone, so a 60 minute game over six zones opens a zone every 10 minutes: zone 1 from minute 0-10, zone 2 from 10-20, and the final zone from 50-60
+- The game duration is split evenly into one window per zone, so a 60 minute game over six zones gives a zone every 10 minutes
+- Each zone is **locked** for the start of its window (the zone lock, 3 minutes by default and set by the host). With the defaults zone 1 can be captured from minute 3-10, zone 2 from 13-20, and the final zone from 53-60. Nobody can capture zone 1 the moment the game starts, or two zones back to back across a window boundary. The lock is never more than half a window, so a short game still leaves each zone open for a while
 - Zones close in from 800m down to 140m, each drawn around the final zone, so they can sit partly outside the target area
 - The zones do not nest exactly. Each one may hang up to a tenth of its own radius outside the one it sits in (`zoneOverhang`), which keeps a Runner's picture approximate rather than a set of circles to intersect
-- A zone can only be captured while its window is running, and only with the app open from inside the zone
-- Capturing a zone early reveals the next one straight away so Runners can start moving, but it stays **locked** until its own window opens
+- A zone can only be captured once its lock is up and before its window closes, and only with the app open from inside the zone
+- Capturing a zone early reveals the next one straight away so Runners can start moving, but it stays **locked** until its own window's lock is up
 - A window that closes with the zone uncaptured costs the Runner a shield, and they move on to the next zone with everyone else
 - The game ends when the final zone's window closes
 
