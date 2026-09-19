@@ -2,8 +2,8 @@
  * Main Application Logic for HUNTED Game
  */
 
-// Global variables
-let currentScreen = "splash-screen";
+// Global variables. The screen on show is tracked by UI.showScreen as
+// window.currentScreen.
 let socket;
 let gameState = {
   roomId: null,
@@ -13,12 +13,36 @@ let gameState = {
   isRoomCreator: false,
 };
 
+// Whether the server has this connection down as being in our room. It goes
+// false whenever the connection drops, and true again once we have rejoined,
+// so nothing is sent for a room the server doesn't know we are in yet.
+let roomJoined = false;
+
+// A create or join the server hasn't answered yet, so a second tap can't send
+// another
+let requestInFlight = false;
+
+// A catch report the server hasn't answered yet
+let catchReportPending = false;
+
 function initApp() {
   setupAllEventListeners();
   UI.init();
   GameMap.init();
+  restoreSession();
   setupSocketConnection();
-  checkForExistingSession();
+}
+
+// Is this device in a room the server knows about, right now?
+function isInRoom() {
+  return Boolean(socket && socket.connected && roomJoined);
+}
+
+// Game code sends pings through this, so it only does so while we are in
+window.isInRoom = isInRoom;
+
+function hasSession() {
+  return Boolean(gameState.roomId && gameState.playerId);
 }
 
 function setupAllEventListeners() {
@@ -73,6 +97,18 @@ function setupAllEventListeners() {
   document.getElementById("delete-lobby-btn").addEventListener("click", deleteLobby);
   document.getElementById("return-game-btn").addEventListener("click", returnToActiveGame);
 
+  // The host's remove buttons live inside the player lists, which are rebuilt
+  // on every update
+  ["hunter-list", "runner-list"].forEach((listId) => {
+    document.getElementById(listId).addEventListener("click", (e) => {
+      const button = e.target.closest(".remove-player-btn");
+
+      if (button) {
+        removePlayer(button.dataset.playerId, button.dataset.username);
+      }
+    });
+  });
+
   // Game controls
   document.getElementById("menu-btn").addEventListener("click", () => {
     document.getElementById("game-menu").classList.add("open");
@@ -95,11 +131,11 @@ function setupAllEventListeners() {
   document.getElementById("voice-volume").addEventListener("input", (e) => {
     const volumePercent = parseInt(e.target.value);
     const volumeLevel = volumePercent / 100;
-    
+
     if (typeof VoiceChat !== 'undefined') {
       VoiceChat.setVolume(volumeLevel);
     }
-    
+
     // Update volume display
     document.getElementById("voice-volume-value").textContent = `${volumePercent}%`;
   });
@@ -128,63 +164,88 @@ function setupAllEventListeners() {
 
   document.getElementById("replay-back-btn").addEventListener("click", () => {
     UI.showScreen("game-over-screen");
-    currentScreen = "game-over-screen";
   });
 
   // Handle geolocation permissions
   if ("geolocation" in navigator) {
-    navigator.permissions.query({ name: "geolocation" }).then((result) => {
-      if (result.state === "denied") {
-        UI.showNotification("Location permission is required for this game.", "error");
-      }
-    });
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions
+        .query({ name: "geolocation" })
+        .then((result) => {
+          if (result.state === "denied") {
+            UI.showNotification("Location permission is required for this game.", "error");
+          }
+        })
+        .catch(() => {});
+    }
   } else {
     UI.showNotification("Geolocation is not supported by your browser.", "error");
   }
 }
 
-// Setup Socket.IO connection
+// Setup Socket.IO connection. A dropped connection is left to Socket.IO to
+// bring back - it keeps retrying on its own - and we rejoin our room each time
+// it does. Nobody is taken out of a game for losing signal or closing the app.
 function setupSocketConnection() {
   socket = io();
 
   // Connection events
   socket.on("connect", () => {
     console.log("Connected to server");
-    localStorage.removeItem("reloadAttempts");
+    UI.setConnectionStatus("connected");
+
+    if (hasSession()) {
+      socket.emit("rejoin_room", { roomId: gameState.roomId, playerId: gameState.playerId });
+    }
   });
 
   socket.on("disconnect", (reason) => {
-    const reloadAttempts = parseInt(localStorage.getItem("reloadAttempts")) || 0;
+    console.log("Disconnected from server", reason);
+    roomJoined = false;
 
-    if (reloadAttempts < 3) {
-      UI.showLoading("Attempting to reconnect...");
-      localStorage.setItem("reloadAttempts", (reloadAttempts + 1).toString());
-      window.location.reload();
-    } else {
-      console.log("Disconnected from server", reason);
+    // A create or join still waiting on its answer went down with the
+    // connection, so let it be tried again
+    if (requestInFlight) {
+      requestInFlight = false;
       UI.hideLoading();
-      UI.showNotification("Disconnected from server. Please refresh the page.", "error");
-      localStorage.removeItem("reloadAttempts");
+      UI.showNotification("The connection dropped before the server answered. Try again.", "warning");
     }
+
+    // We hung up on purpose
+    if (reason === "io client disconnect") {
+      return;
+    }
+
+    // The server hung up on us, and Socket.IO only retries by itself for
+    // connections that dropped
+    if (reason === "io server disconnect") {
+      socket.connect();
+    }
+
+    UI.setConnectionStatus("reconnecting");
   });
 
   socket.on("connect_error", (error) => {
     console.error("Connection error:", error);
     UI.hideLoading();
-    UI.showNotification("Connection error. Please check your internet connection.", "error");
+    UI.setConnectionStatus("offline");
   });
 
   socket.on("error", (data) => {
     console.error("Socket error:", data);
+    requestInFlight = false;
     UI.hideLoading();
-    UI.showNotification(data.message || "An error occurred", "error");
+    UI.showNotification((data && data.message) || "An error occurred", "error");
   });
 
   // Game events
   socket.on("join_success", handleJoinSuccess);
+  socket.on("rejoin_failed", handleRejoinFailed);
   socket.on("game_state", handleGameState);
   socket.on("player_joined", handlePlayerJoined);
+  socket.on("player_left", handlePlayerLeft);
   socket.on("player_disconnected", handlePlayerDisconnected);
+  socket.on("removed_from_room", handleRemovedFromRoom);
   socket.on("runner_location", handleRunnerLocation);
   socket.on("target_reached", handleTargetReached);
   socket.on("runner_caught", handleRunnerCaught);
@@ -206,45 +267,59 @@ function setupSocketConnection() {
   socket.on("voice_transmission_ended", handleVoiceTransmissionEnded);
 }
 
-// Check for existing session
-function checkForExistingSession() {
+// Pick up a game this device was in before it was reloaded or closed. The
+// connect handler asks the server to put us back in the room.
+function restoreSession() {
   const savedSession = localStorage.getItem("huntedGameSession");
 
-  if (savedSession) {
-    try {
-      const session = JSON.parse(savedSession);
-      if (session.roomId && session.playerId && session.username) {
-        gameState = {
-          ...gameState,
-          ...session,
-        };
-
-        // Attempt to rejoin the game
-        UI.showLoading("Rejoining game...");
-
-        // Emit join event with saved data
-        socket.emit("join_room", {
-          roomName: session.roomName,
-          username: session.username,
-          team: session.team,
-        });
-
-        // If the game was active before reload, request the game state
-        // The handleGameState function will redirect to the game screen if needed
-        if (session.gameStatus === "active") {
-          console.log("Game was active, requesting current state");
-          socket.emit("resync_game_state", { roomId: session.roomId });
-        }
-      }
-    } catch (error) {
-      console.error("Error parsing saved session:", error);
-      localStorage.removeItem("huntedGameSession");
-    }
+  if (!savedSession) {
+    return;
   }
+
+  try {
+    const session = JSON.parse(savedSession);
+
+    if (session.roomId && session.playerId && session.username) {
+      gameState = {
+        ...gameState,
+        ...session,
+      };
+
+      UI.showLoading("Rejoining game...");
+    }
+  } catch (error) {
+    console.error("Error parsing saved session:", error);
+    localStorage.removeItem("huntedGameSession");
+  }
+}
+
+// Hold off a second create or join until the first is answered - or until it
+// plainly never will be, alongside the loading overlay giving up on it
+let requestTimer = null;
+
+function beginRequest() {
+  requestInFlight = true;
+  clearTimeout(requestTimer);
+  requestTimer = setTimeout(() => {
+    requestInFlight = false;
+  }, 20000);
+}
+
+// Actions that change the game need the server to hear them now, not whenever
+// the connection comes back
+function requireConnection() {
+  if (socket && socket.connected) {
+    return true;
+  }
+
+  UI.showNotification("You're offline. Wait for the connection to come back and try again.", "warning");
+  return false;
 }
 
 // Create a new room
 function createRoom() {
+  if (requestInFlight || !requireConnection()) return;
+
   const roomName = document.getElementById("room-name").value.trim();
   const username = document.getElementById("creator-username").value.trim();
   const gameDuration = parseInt(document.getElementById("game-duration").value);
@@ -269,19 +344,12 @@ function createRoom() {
     return UI.showNotification("Please select a starting location on the map", "error");
   }
 
-  // Log the selected location for debugging
-  console.log("Selected location:", location);
-
-  // Update game state
-  gameState.roomName = roomName;
   gameState.username = username;
-  gameState.team = team;
-  gameState.isRoomCreator = true;
-
-  // Show loading
+  beginRequest();
   UI.showLoading("Creating room...");
 
-  // Emit socket event to create room
+  // The server creates the room and puts us in it as the host in one go, and
+  // answers with join_success
   socket.emit("create_room", {
     roomName,
     username,
@@ -292,20 +360,12 @@ function createRoom() {
     centralLat: location.lat,
     centralLng: location.lng,
   });
-
-  socket.on("room_created", (data) => {
-    console.log("Room created:", data);
-
-    socket.emit("join_room", {
-      roomName: data.roomName,
-      username,
-      team,
-    });
-  });
 }
 
 // Join an existing room
 function joinRoom() {
+  if (requestInFlight || !requireConnection()) return;
+
   const roomName = document.getElementById("join-room-name").value.trim();
   const username = document.getElementById("join-username").value.trim();
   const teamBtn = document.querySelector("#join-room-form .team-btn.selected");
@@ -320,16 +380,10 @@ function joinRoom() {
 
   const team = teamBtn.dataset.team;
 
-  // Update game state
-  gameState.roomName = roomName;
   gameState.username = username;
-  gameState.team = team;
-  gameState.isRoomCreator = false;
-
-  // Show loading
+  beginRequest();
   UI.showLoading("Joining room...");
 
-  // Emit socket event to join room
   socket.emit("join_room", {
     roomName,
     username,
@@ -337,49 +391,86 @@ function joinRoom() {
   });
 }
 
-// Handle successful join
+// We are in a room: newly created, joined from the form, or rejoined after a
+// reload or a dropped connection
 function handleJoinSuccess(data) {
   console.log("Join success:", data);
 
-  // Hide loading
+  requestInFlight = false;
   UI.hideLoading();
 
-  // Update game state
+  const state = data.gameState;
+
+  if (!state) {
+    return UI.showNotification("Could not load the room", "error");
+  }
+
   gameState.roomId = data.roomId;
   gameState.playerId = data.playerId;
+  gameState.roomName = state.roomName;
+  roomJoined = true;
 
-  // Save session to localStorage
+  syncMyPlayer(state);
+  showRoom(state);
+
+  // Back from a dropped connection mid-game: let the server know where we are
+  // straight away rather than on the next GPS fix
+  if (state.status === "active" && GameMap.currentLocation) {
+    Game.emitLocationUpdate(GameMap.currentLocation.lat, GameMap.currentLocation.lng);
+  }
+}
+
+// The room or our place in it is gone - deleted, or we left it on another
+// device - so the saved session is no use any more
+function handleRejoinFailed(data) {
+  console.log("Rejoin failed:", data);
+  leaveRoomLocally((data && data.message) || "That game could not be found.", "warning");
+}
+
+// Keep what we know about ourselves in step with the server. Our team can
+// change while the app is closed (miss two zones and you are a hunter), and the
+// host can change when a host leaves.
+function syncMyPlayer(state) {
+  const me = (state.players || []).find((player) => player.playerId === gameState.playerId);
+
+  if (me) {
+    gameState.username = me.username;
+    gameState.team = me.team;
+  }
+
+  gameState.isRoomCreator = Boolean(state.hostPlayerId) && state.hostPlayerId === gameState.playerId;
+  gameState.gameStatus = state.status;
   saveGameSession();
+}
 
-  // If game is active, go directly to game screen
-  if (data.gameState && data.gameState.status === "active") {
-    startGameUI(data.gameState);
+// Show whichever screen the room's state calls for
+function showRoom(state) {
+  const screen = window.currentScreen;
+
+  if (state.status === "active") {
+    if (screen === "game-screen" && Game.isRunning(state.roomId)) {
+      Game.updateGameState(state);
+    } else {
+      startGameUI(state, { resumed: true });
+    }
     return;
   }
 
-  // Show lobby screen
-  UI.showScreen("lobby-screen");
-  currentScreen = "lobby-screen";
-
-  // Update lobby UI with the provided game state
-  if (data.gameState && data.gameState.centralLocation) {
-    console.log("Central location from join success:", data.gameState.centralLocation);
-    // Store central location for reference
-    gameState.centralLocation = data.gameState.centralLocation;
+  if (state.status === "completed") {
+    // Someone looking over the results or the replay stays where they are
+    if (screen !== "game-over-screen" && screen !== "replay-screen") {
+      handleGameOver({ gameState: state });
+    }
+    return;
   }
 
-  updateLobbyUI(data.gameState);
-
-  // Show/hide host-only controls based on whether user is room creator
-  document.getElementById("start-game-btn").style.display = gameState.isRoomCreator ? "block" : "none";
-  document.getElementById("delete-lobby-btn").style.display = gameState.isRoomCreator ? "block" : "none";
+  UI.showScreen("lobby-screen");
+  updateLobbyUI(state);
 }
 
 // Update lobby UI with current game state
 function updateLobbyUI(state) {
   if (!state) return;
-
-  console.log("Updating lobby UI with state:", state);
 
   // Set room name
   const roomNameElement = document.getElementById("lobby-room-name");
@@ -413,44 +504,27 @@ function updateLobbyUI(state) {
     targetRadiusElement.textContent = `${state.targetRadius}m radius`;
   }
 
+  const isHunter = gameState.team === "hunter";
+  const mapContainer = document.getElementById("lobby-map");
   const hunterMessage = document.getElementById("hunter-map-message");
+  const runnerMessage = document.getElementById("runner-map-message");
 
-  if (hunterMessage) {
-    hunterMessage.style.display = gameState.team === "hunter" ? "block" : "none";
-  }
+  // Only hunters are shown the target area
+  if (hunterMessage) hunterMessage.style.display = isHunter ? "block" : "none";
+  if (runnerMessage) runnerMessage.style.display = isHunter ? "none" : "block";
+  if (mapContainer) mapContainer.style.display = isHunter ? "" : "none";
 
-  // Update lobby map only if the player is a hunter
-  if (state.centralLocation && gameState.team === "hunter") {
+  if (isHunter && state.centralLocation) {
     GameMap.initLobbyMap(state.centralLocation.lat, state.centralLocation.lng, state.targetRadius);
-    // Hide runner message
-    const runnerMessage = document.getElementById("runner-map-message");
-    if (runnerMessage) {
-      runnerMessage.style.display = "none";
-    }
-  } else {
-    // Hide the lobby map container for runners
-    const mapContainer = document.getElementById("lobby-map");
-    if (mapContainer) {
-      mapContainer.style.display = "none";
-    }
-    // Show runner message
-    const runnerMessage = document.getElementById("runner-map-message");
-    if (runnerMessage) {
-      runnerMessage.style.display = "block";
-    }
   }
 
-  // Show/hide buttons based on game status
-  const startGameBtn = document.getElementById("start-game-btn");
-  const returnGameBtn = document.getElementById("return-game-btn");
+  // Host-only controls follow whoever is host right now
+  const isHost = gameState.isRoomCreator;
+  const isActive = state.status === "active";
 
-  if (state.status === "active") {
-    startGameBtn.style.display = "none";
-    returnGameBtn.style.display = "block";
-  } else {
-    startGameBtn.style.display = gameState.isRoomCreator ? "block" : "none";
-    returnGameBtn.style.display = "none";
-  }
+  document.getElementById("start-game-btn").style.display = isHost && !isActive ? "block" : "none";
+  document.getElementById("delete-lobby-btn").style.display = isHost && !isActive ? "block" : "none";
+  document.getElementById("return-game-btn").style.display = isActive ? "block" : "none";
 }
 
 // Update player lists in lobby
@@ -464,87 +538,155 @@ function updatePlayerLists(players) {
   hunterList.innerHTML = "";
   runnerList.innerHTML = "";
 
-  // Filter players by team
-  const hunters = players.filter((p) => p.team === "hunter");
-  const runners = players.filter((p) => p.team === "runner");
+  const present = players.filter((p) => !p.leftAt);
 
-  // Add hunters to list
-  hunters.forEach((hunter) => {
-    const listItem = document.createElement("li");
-    listItem.className = "player-item";
-    listItem.innerHTML = `
-            <img src="assets/icons/hunter.svg" alt="Hunter" class="player-avatar">
-            <span class="player-name">${hunter.username}</span>
-        `;
-    hunterList.appendChild(listItem);
-  });
+  present.filter((p) => p.team === "hunter").forEach((player) => hunterList.appendChild(lobbyPlayerItem(player)));
+  present.filter((p) => p.team === "runner").forEach((player) => runnerList.appendChild(lobbyPlayerItem(player)));
 
-  // Add runners to list
-  runners.forEach((runner) => {
-    const listItem = document.createElement("li");
-    listItem.className = "player-item";
-    listItem.innerHTML = `
-            <img src="assets/icons/runner.svg" alt="Runner" class="player-avatar">
-            <span class="player-name">${runner.username}</span>
-        `;
-    runnerList.appendChild(listItem);
+  [hunterList, runnerList].forEach((list) => {
+    if (!list.children.length) {
+      const empty = document.createElement("li");
+      empty.className = "player-list-empty";
+      empty.textContent = "Nobody yet";
+      list.appendChild(empty);
+    }
   });
+}
+
+// One player in the lobby: who they are, whether they are the host or you, and
+// whether their app is open. Names go in as text, never as HTML.
+function lobbyPlayerItem(player) {
+  const isMe = player.playerId === gameState.playerId;
+  const item = document.createElement("li");
+  item.className = `player-item lobby-player${player.connected === false ? " away" : ""}`;
+  item.setAttribute("data-player-id", player.playerId);
+
+  const avatar = document.createElement("img");
+  avatar.className = "player-avatar";
+  avatar.src = `assets/icons/${player.team === "runner" ? "runner" : "hunter"}.svg`;
+  avatar.alt = player.team === "runner" ? "Runner" : "Hunter";
+
+  const details = document.createElement("div");
+  details.className = "player-details";
+
+  const name = document.createElement("span");
+  name.className = "player-name";
+  name.textContent = player.username;
+
+  const tags = [];
+  if (player.isHost) tags.push("host");
+  if (isMe) tags.push("you");
+  if (player.connected === false) tags.push("away");
+
+  details.appendChild(name);
+
+  if (tags.length) {
+    const tagLine = document.createElement("span");
+    tagLine.className = "player-tags";
+    tagLine.textContent = tags.join(" · ");
+    details.appendChild(tagLine);
+  }
+
+  item.append(avatar, details);
+
+  // The host can take anyone else out of the lobby
+  if (gameState.isRoomCreator && !isMe) {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "remove-player-btn";
+    remove.dataset.playerId = player.playerId;
+    remove.dataset.username = player.username;
+    remove.setAttribute("aria-label", `Remove ${player.username}`);
+    remove.textContent = "×";
+    item.appendChild(remove);
+  }
+
+  return item;
 }
 
 // Handle new game state
 function handleGameState(state) {
+  // Anything for a room we are no longer in is old news
+  if (!state || state.roomId !== gameState.roomId) {
+    return;
+  }
+
   console.log("Received game state:", state);
 
-  // Update game status in our local state
-  gameState.gameStatus = state.status;
-  saveGameSession();
+  syncMyPlayer(state);
 
-  // Update UI based on current screen
-  if (currentScreen === "lobby-screen") {
+  const screen = window.currentScreen;
+
+  if (state.status === "completed") {
+    if (screen !== "game-over-screen" && screen !== "replay-screen") {
+      handleGameOver({ gameState: state });
+    }
+    return;
+  }
+
+  // The game started while we weren't listening, so go straight to it
+  if (state.status === "active" && screen === "lobby-screen") {
+    startGameUI(state);
+    return;
+  }
+
+  if (screen === "lobby-screen") {
     updateLobbyUI(state);
-  } else if (currentScreen === "game-screen") {
-    if (!Game.gameState) {
+  } else if (screen === "game-screen") {
+    if (!Game.isRunning(state.roomId)) {
       // Game not initialized yet, do full initialization
       Game.init(gameState, socket, state);
     } else {
-      // Ensure we always update the game state
       Game.updateGameState(state);
     }
   }
-
-  if (state.status === "completed" && currentScreen !== "game-over-screen") {
-    handleGameOver({
-      gameState: state,
-    });
-  }
 }
 
+// Only somebody joining for the first time is announced. Players coming back
+// after a dropped connection reappear quietly.
 function handlePlayerJoined(data) {
   console.log("Player joined:", data);
 
-  // Show notification
-  UI.showNotification(`${data.username} joined as ${data.team}`, "info");
+  const team = data.team === "runner" ? "a Runner" : "a Hunter";
+  UI.showNotification(`${data.username} joined as ${team}`, "info");
+}
 
-  if (gameState.roomId) {
-    // Request updated game state
-    socket.emit("resync_game_state", { roomId: gameState.roomId });
+// Somebody left on purpose (or the host took them out of the lobby). The new
+// player lists arrive in a game_state of their own.
+function handlePlayerLeft(data) {
+  console.log("Player left:", data);
+
+  const where = window.currentScreen === "game-screen" ? "the game" : "the lobby";
+  UI.showNotification(data.removed ? `${data.username} was removed from the lobby` : `${data.username} left ${where}`, "info");
+
+  if (data.newHostId && data.newHostId === gameState.playerId) {
+    UI.showNotification("You're the host now", "success");
+  }
+
+  if (typeof VoiceChat !== "undefined" && VoiceChat.handlePlayerLeft) {
+    VoiceChat.handlePlayerLeft(data.playerId);
   }
 }
 
+// Somebody's app closed or lost signal. They are still in the game - this is
+// only so their voice doesn't hang - and the lobby shows them as away.
 function handlePlayerDisconnected(data) {
   console.log("Player disconnected:", data);
-  UI.showNotification(`${data.username} disconnected`, "info");
 
   // Stop and forget any voice audio still queued for them
   if (typeof VoiceChat !== "undefined" && VoiceChat.handlePlayerLeft) {
     VoiceChat.handlePlayerLeft(data.playerId);
   }
+}
 
-  socket.emit("resync_game_state", { roomId: gameState.roomId });
+// The host took us out of the lobby, or we left on another device
+function handleRemovedFromRoom(data) {
+  console.log("Removed from room:", data);
+  leaveRoomLocally((data && data.message) || "You are no longer in that room.", "warning");
 }
 
 function handleRunnerLocation(data) {
-  if (currentScreen === "game-screen") {
+  if (window.currentScreen === "game-screen") {
     // Update player marker on map
     GameMap.updateOtherPlayerLocation(data);
   }
@@ -590,6 +732,7 @@ function handleShieldLost(data) {
   const cause = data.reason === "missed_zone" ? `missing zone ${data.zoneNumber}` : "being caught";
 
   if (data.playerId === gameState.playerId) {
+    catchReportPending = false;
     const immuneFor = data.immunityUntil ? ` You are immune for ${zoneUtils.formatCountdown(data.immunityUntil - Date.now())}.` : "";
     UI.showNotification(`Your shield took the hit for ${cause}. One more and you are out.${immuneFor}`, "warning");
   } else {
@@ -602,6 +745,7 @@ function handleShieldLost(data) {
 // The server turned down a catch because that runner is still immune
 function handleCatchRejected(data) {
   console.log("Catch rejected:", data);
+  catchReportPending = false;
   UI.showNotification(`${data.username} is immune for another ${zoneUtils.formatCountdown(data.immunityUntil - Date.now())}.`, "warning");
 }
 
@@ -612,6 +756,7 @@ function handleRunnerCaught(data) {
   const missedZone = data.reason === "missed_zone";
 
   if (isMe) {
+    catchReportPending = false;
     UI.showNotification(missedZone ? `You missed zone ${data.zoneNumber} with no shield left. You are a Hunter now.` : "You have been caught! You are now a Hunter.", "warning");
 
     // Change our team to hunter
@@ -627,13 +772,30 @@ function handleRunnerCaught(data) {
 
 function handleGameOver(data) {
   console.log("Game over:", data);
+
+  const state = data && data.gameState;
+
+  if (state && state.roomId && state.roomId !== gameState.roomId) {
+    return;
+  }
+
+  // No more pings, GPS or voice once the game is done
+  Game.stop();
+
+  if (state) {
+    gameState.gameStatus = state.status;
+    saveGameSession();
+  }
+
+  document.getElementById("game-menu").classList.remove("open");
+  UI.hideLoading();
   UI.showScreen("game-over-screen");
   updateGameOverUI(data);
 }
 
 // The order players are listed in after the game: home first, then those still
 // out there when the clock stopped, then everyone who went out, then hunters
-const OUTCOME_ORDER = ["won", "out_of_time", "running", "caught", "missed_zone", "hunter"];
+const OUTCOME_ORDER = ["won", "out_of_time", "running", "caught", "missed_zone", "left", "hunter"];
 
 function updateGameOverUI(data) {
   const state = data.gameState;
@@ -641,7 +803,10 @@ function updateGameOverUI(data) {
 
   const players = state.players || [];
   const home = players.filter((player) => player.outcome === "won");
-  const out = players.filter((player) => player.outcome === "caught" || player.outcome === "missed_zone");
+
+  // A runner who left went out as surely as one who was caught. A hunter who
+  // left never had a race to lose.
+  const out = players.filter((player) => player.outcome === "caught" || player.outcome === "missed_zone" || (player.outcome === "left" && player.colorIndex != null));
 
   // Who won, said plainly
   const headline = document.getElementById("game-over-headline");
@@ -707,6 +872,8 @@ function openGameReplay() {
     return UI.showNotification("There is no game to look back on", "warning");
   }
 
+  if (!requireConnection()) return;
+
   UI.showLoading("Loading the game...");
   socket.emit("request_game_review", { roomId: gameState.roomId });
 }
@@ -715,7 +882,6 @@ function handleGameReview(review) {
   console.log("Game review:", review);
   UI.hideLoading();
   UI.showScreen("replay-screen");
-  currentScreen = "replay-screen";
 
   GameMap.renderReview(review);
   updateReplayLegend(review);
@@ -748,16 +914,13 @@ function updateReplayLegend(review) {
 }
 
 function startGame() {
-  console.log("Starting game...", gameState);
-
   if (!gameState.isRoomCreator) {
-    return UI.showNotification("Only the room creator can start the game", "error");
+    return UI.showNotification("Only the host can start the game", "error");
   }
 
-  UI.showLoading("Starting game...");
+  if (!requireConnection()) return;
 
-  // Request server to start the game
-  console.log("Emitting start_game event with roomId:", gameState.roomId);
+  UI.showLoading("Starting game...");
   socket.emit("start_game", { roomId: gameState.roomId });
 }
 
@@ -770,14 +933,21 @@ function handleGameStarted(data) {
     UI.showNotification("Error starting game: No game state received", "error");
     return;
   }
+
+  // Already playing it (a second tap on Start was answered with the game)
+  if (window.currentScreen === "game-screen" && Game.isRunning(data.gameState.roomId)) {
+    return Game.updateGameState(data.gameState);
+  }
+
+  syncMyPlayer(data.gameState);
   startGameUI(data.gameState);
 }
 
-function startGameUI(state) {
+// resumed: coming back to a game already under way, rather than it starting
+function startGameUI(state, { resumed = false } = {}) {
   console.log("Starting game UI with state:", state);
   UI.hideLoading();
   UI.showScreen("game-screen");
-  currentScreen = "game-screen";
   gameState.gameStatus = state.status;
   saveGameSession();
 
@@ -790,7 +960,7 @@ function startGameUI(state) {
 
   try {
     Game.init(gameState, socket, state);
-    UI.showNotification("Game started!", "success");
+    UI.showNotification(resumed ? "Back in the game" : "Game started!", "success");
   } catch (error) {
     console.error("Error initializing game:", error);
     UI.showNotification("Error initializing game: " + error.message, "error");
@@ -799,26 +969,69 @@ function startGameUI(state) {
 
 function deleteLobby() {
   if (!gameState.isRoomCreator) {
-    return UI.showNotification("Only the room creator can delete the lobby", "error");
+    return UI.showNotification("Only the host can delete the lobby", "error");
   }
 
-  if (confirm("Are you sure you want to delete this lobby? All players will be disconnected.")) {
+  if (!requireConnection()) return;
+
+  if (confirm("Are you sure you want to delete this lobby? Everyone in it will be sent back to the start.")) {
     UI.showLoading("Deleting lobby...");
     socket.emit("delete_room", { roomId: gameState.roomId });
   }
 }
 
-function leaveLobby() {
-  resetGameState();
-  socket.disconnect();
+// The host takes someone out of the lobby
+function removePlayer(playerId, username) {
+  if (!gameState.isRoomCreator || !playerId) return;
+  if (!requireConnection()) return;
 
-  // Reconnect socket for future games
-  socket.connect();
-  UI.showScreen("splash-screen");
+  if (confirm(`Remove ${username} from the lobby?`)) {
+    socket.emit("remove_player", { playerId });
+  }
+}
+
+// Ask the server to take us out of the room, and only forget it once the
+// server has. Closing the app is always the way to step away without leaving.
+function requestLeave(onLeft) {
+  if (!requireConnection()) return;
+
+  UI.showLoading("Leaving...");
+
+  socket.timeout(8000).emit("leave_room", {}, (err, response) => {
+    UI.hideLoading();
+
+    if (err || !response || !response.ok) {
+      return UI.showNotification((response && response.message) || "Couldn't reach the server to leave. Try again.", "error");
+    }
+
+    onLeft();
+  });
+}
+
+function leaveLobby() {
+  if (!requireConnection()) return;
+
+  if (gameState.isRoomCreator) {
+    const others = document.querySelectorAll("#lobby-screen .lobby-player").length - 1;
+    const message = others > 0 ? "Leave the lobby? Someone else will become the host." : "Leave the lobby? You're the only one in it, so it will be closed.";
+
+    if (!confirm(message)) return;
+  }
+
+  requestLeave(() => leaveRoomLocally());
 }
 
 function reportSelfCaught() {
+  if (catchReportPending || !requireConnection()) return;
+
   if (confirm("Are you sure you want to report yourself as caught? This cannot be undone.")) {
+    // One report at a time: a second tap on a slow connection would count as
+    // a second catch
+    catchReportPending = true;
+    setTimeout(() => {
+      catchReportPending = false;
+    }, 10000);
+
     socket.emit("player_caught", {
       caughtPlayerId: gameState.playerId,
     });
@@ -826,50 +1039,69 @@ function reportSelfCaught() {
 }
 
 function leaveGame() {
-  if (confirm("Are you sure you want to leave the game? Your progress will be lost.")) {
-    resetGameState();
-    socket.disconnect();
+  if (!requireConnection()) return;
 
-    // Reconnect socket for future games
-    socket.connect();
-    UI.showScreen("splash-screen");
+  const player = Game.getMyPlayer();
+  const stillRunning = gameState.team === "runner" && player && player.status !== "won" && player.status !== "caught";
+
+  const message = stillRunning
+    ? "Leave the game? You will be out, and this can't be undone.\n\nTo take a break without leaving, just close the app - you stay in the game."
+    : "Leave the game?\n\nTo take a break without leaving, just close the app - you stay in the game.";
+
+  if (confirm(message)) {
+    requestLeave(() => leaveRoomLocally());
   }
 }
 
 // Setup a new game after game over
 function setupNewGame() {
-  // Clear game state but keep username
-  const username = gameState.username;
-  resetGameState();
-  gameState.username = username;
+  detachFromFinishedGame();
 
-  // Go to create room screen
+  // Go to create room screen, with the username still filled in
   UI.showScreen("create-room-screen");
-
-  // Pre-fill username
-  document.getElementById("creator-username").value = username;
 }
 
 // Return to home screen after game over
 function returnToHome() {
-  resetGameState();
+  detachFromFinishedGame();
   UI.showScreen("splash-screen");
+}
+
+// The game is over, so there is nothing to change on the server: just stop
+// listening to the room
+function detachFromFinishedGame() {
+  if (socket && socket.connected) {
+    socket.emit("leave_room", {});
+  }
+
+  leaveRoomLocally(null);
 }
 
 function handleRoomDeleted(data) {
   console.log("Room deleted:", data);
-  UI.hideLoading();
-  UI.showNotification("The room has been deleted by the host", "warning");
-  resetGameState();
-  UI.showScreen("splash-screen");
+  leaveRoomLocally("The room has been deleted by the host", "warning");
 }
 
 function handleDeleteSuccess(data) {
   console.log("Delete success:", data);
-  UI.hideLoading();
-  UI.showNotification("Room deleted successfully", "success");
+  leaveRoomLocally("Room deleted", "success");
+}
+
+// Forget the room on this device and go back to the start
+function leaveRoomLocally(message, type = "info") {
+  Game.stop();
   resetGameState();
-  UI.showScreen("splash-screen");
+  requestInFlight = false;
+  UI.hideLoading();
+  document.getElementById("game-menu").classList.remove("open");
+
+  if (window.currentScreen !== "create-room-screen") {
+    UI.showScreen("splash-screen");
+  }
+
+  if (message) {
+    UI.showNotification(message, type);
+  }
 }
 
 function resetGameState() {
@@ -884,12 +1116,17 @@ function resetGameState() {
     isRoomCreator: false,
   };
 
+  roomJoined = false;
+  catchReportPending = false;
+
   // Clear session storage
   localStorage.removeItem("huntedGameSession");
 }
 
 // Save game session to localStorage
 function saveGameSession() {
+  if (!hasSession()) return;
+
   localStorage.setItem("huntedGameSession", JSON.stringify(gameState));
 }
 
@@ -902,7 +1139,6 @@ window.Game.getGameState = function () {
 // Function to return to an active game from the lobby
 function returnToActiveGame() {
   UI.showScreen("game-screen");
-  currentScreen = "game-screen";
   // Request the latest game state
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }
@@ -979,11 +1215,11 @@ function updateVoiceChatSettingsDisplay() {
     // Update volume slider and display
     const volumeSlider = document.getElementById('voice-volume');
     const volumeDisplay = document.getElementById('voice-volume-value');
-    
+
     if (volumeSlider) {
       volumeSlider.value = volumePercent;
     }
-    
+
     if (volumeDisplay) {
       volumeDisplay.textContent = `${volumePercent}%`;
     }

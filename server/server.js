@@ -16,8 +16,9 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "../public")));
 app.use("/shared", express.static(path.join(__dirname, "../shared")));
 
-// Database setup
-const dbPath = path.join(__dirname, "../database/hunted.db");
+// Database setup. DB_PATH lets a test run point the server at a throwaway
+// database rather than the real one.
+const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.join(__dirname, "../database/hunted.db");
 const dbDir = path.dirname(dbPath);
 
 // Create database directory if it doesn't exist

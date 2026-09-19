@@ -58,6 +58,10 @@ async function createGame({ runners = ["Ruby"], hunters = ["Hank"], gameDuration
       },
       emit: (event, payload) => socket.emitted.push({ event, payload }),
       join: () => {},
+      leave: () => {},
+      to: (room) => ({
+        emit: (event, payload) => broadcasts.push({ room, event, payload, except: id }),
+      }),
       fire: (event, payload) => handlers[event](payload),
       received: (event) => socket.emitted.filter((entry) => entry.event === event),
       lastState: () => {
@@ -476,6 +480,50 @@ test("capturing the final zone in its window wins the game", async () => {
   const target = await game.target("Ruby");
   assert.strictEqual(target.status, "reached");
   assert.ok(target.reached_at);
+});
+
+test("one runner winning doesn't end the game while others are still running", async () => {
+  const game = await createGame({ runners: ["Ruby", "Sam"] });
+
+  // Ruby is on the final zone with its window open; Sam is nowhere near
+  await game.run("UPDATE targets SET zone_index = ?, radius_level = ? WHERE player_id = ?", [ZONE_COUNT - 1, config.game.targetRadiusLevels[ZONE_COUNT - 1], game.players.Ruby.playerId]);
+  await game.setElapsed(55);
+  await game.pingInsideZone("Ruby");
+
+  assert.strictEqual((await game.player("Ruby")).status, "won");
+  assert.strictEqual((await game.room()).status, "active", "Sam is still out there, so the game goes on");
+  assert.strictEqual(game.of("game_over").length, 0);
+  assert.strictEqual(game.of("runner_won").length, 1);
+
+  // Once the last runner still running goes out, it is over
+  game.players.Sam.socket.fire("player_caught", { caughtPlayerId: game.players.Sam.playerId });
+  await settle();
+  await game.run("UPDATE players SET immunity_until = NULL WHERE player_id = ?", [game.players.Sam.playerId]);
+  game.players.Hank.socket.fire("player_caught", { caughtPlayerId: game.players.Sam.playerId });
+  await settle();
+
+  assert.strictEqual((await game.room()).status, "completed");
+  assert.strictEqual(game.of("game_over").length, 1);
+});
+
+test("a runner who has won stays where they finished, rather than giving the final zone away", async () => {
+  const game = await createGame({ runners: ["Ruby", "Sam"] });
+
+  await game.run("UPDATE targets SET zone_index = ?, radius_level = ? WHERE player_id = ?", [ZONE_COUNT - 1, config.game.targetRadiusLevels[ZONE_COUNT - 1], game.players.Ruby.playerId]);
+  await game.setElapsed(55);
+  await game.pingInsideZone("Ruby");
+
+  const finished = await game.player("Ruby");
+  const sightings = game.of("runner_location").filter((entry) => entry.payload.playerId === game.players.Ruby.playerId).length;
+
+  // Ruby wanders off after winning
+  game.players.Ruby.socket.fire("location_update", { lat: CENTRE.lat + 0.01, lng: CENTRE.lng + 0.01 });
+  await settle();
+
+  const after = await game.player("Ruby");
+  assert.strictEqual(after.last_lat, finished.last_lat, "their position stays where they won");
+  assert.strictEqual(after.last_lng, finished.last_lng);
+  assert.strictEqual(game.of("runner_location").filter((entry) => entry.payload.playerId === game.players.Ruby.playerId).length, sightings, "nobody is sent where they are now");
 });
 
 test("the game ends when the clock runs out, and stragglers lose a life on the way", async () => {

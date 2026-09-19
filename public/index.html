@@ -73,6 +73,8 @@
                 type="text"
                 id="room-name"
                 placeholder="Enter room name"
+                maxlength="30"
+                autocomplete="off"
                 required
               />
             </div>
@@ -82,6 +84,8 @@
                 type="text"
                 id="creator-username"
                 placeholder="Enter your username"
+                maxlength="24"
+                autocomplete="off"
                 required
               />
             </div>
@@ -169,6 +173,8 @@
                 type="text"
                 id="join-room-name"
                 placeholder="Enter room name"
+                maxlength="30"
+                autocomplete="off"
                 required
               />
             </div>
@@ -178,6 +184,8 @@
                 type="text"
                 id="join-username"
                 placeholder="Enter your username"
+                maxlength="24"
+                autocomplete="off"
                 required
               />
             </div>
@@ -275,6 +283,10 @@
             <button id="leave-lobby-btn" class="secondary-btn">
               Leave Lobby
             </button>
+            <p class="lobby-note lobby-leave-note">
+              Closing the app doesn't take you out of the room - open it again and you're straight back.
+              Leave Lobby takes you out of the room.
+            </p>
             <button id="delete-lobby-btn" class="danger-btn">
               Delete Lobby
             </button>
@@ -457,6 +469,9 @@
           <!-- One row per runner, with their colour and how they finished -->
         </div>
       </div>
+
+      <!-- Shown while the connection to the server is down -->
+      <div id="connection-banner" class="connection-banner" role="status" aria-live="polite"></div>
 
       <!-- Notifications -->
       <div id="notification-container" class="notification-container"></div>

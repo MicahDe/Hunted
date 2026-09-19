@@ -88,8 +88,9 @@ module.exports = {
 
   // Security config
   security: {
-    // Maximum username length
-    maxUsernameLength: 20,
+    // Maximum username length. Runners often play in pairs, so this leaves
+    // room for "Christopher & Alexandra".
+    maxUsernameLength: 24,
 
     // Maximum room name length
     maxRoomNameLength: 30,

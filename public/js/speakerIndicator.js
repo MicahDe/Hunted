@@ -106,7 +106,9 @@ const SpeakerIndicator = {
       if (speakers.length === 1) {
         this.speakerName.textContent = primary.username;
       } else if (speakers.length === 2) {
-        this.speakerName.textContent = `${speakers[0].username} & ${speakers[1].username}`;
+        // One to a line: runners who play in pairs already have an "&" in
+        // their name, so "A & B" would read as more people than there are
+        this.speakerName.textContent = `${speakers[0].username}\n${speakers[1].username}`;
       } else {
         this.speakerName.textContent = `${primary.username} +${speakers.length - 1}`;
       }

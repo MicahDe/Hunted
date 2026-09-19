@@ -430,6 +430,8 @@
 
 /* Speaker name */
 .speaker-name {
+    white-space: pre-line;
+    overflow-wrap: anywhere;
     font-family: var(--font-family-mono);
     font-size: var(--font-size-base);
     font-weight: var(--font-weight-bold);

@@ -305,16 +305,9 @@ const GameMap = {
     this.gameMap.setView([centerLat, centerLng], 14);
     updateTrailLabelVisibility();
 
-    // Add game boundary circle
+    // Hunters are shown the target area the final zone is hidden in
     if (gameState.team === "hunter") {
-      this.boundaryCircle = L.circle([centerLat, centerLng], {
-        radius: targetAreaRadius,
-        color: "#999999", // Light enough to see on the dark map
-        fillColor: "#ffffff",
-        fillOpacity: 0.04,
-        weight: 2,
-        dashArray: "5, 10",
-      }).addTo(this.gameMap);
+      this.showTargetArea(centerLat, centerLng, targetAreaRadius);
     }
 
     // Start tracking player location
@@ -324,10 +317,34 @@ const GameMap = {
     this.startLabelUpdateTimer();
   },
 
+  // Draw the target area on the game map, once
+  showTargetArea: function (centerLat, centerLng, targetAreaRadius) {
+    if (!this.gameMap || this.boundaryCircle || centerLat == null || centerLng == null) return;
+
+    this.boundaryCircle = L.circle([centerLat, centerLng], {
+      radius: targetAreaRadius,
+      color: "#999999", // Light enough to see on the dark map
+      fillColor: "#ffffff",
+      fillOpacity: 0.04,
+      weight: 2,
+      dashArray: "5, 10",
+      interactive: false,
+    }).addTo(this.gameMap);
+  },
+
   // Start tracking player location
   startLocationTracking: function () {
+    // Only ever one watch at a time
+    this.stopLocationTracking();
+
+    // The first fix can arrive after tracking has been stopped again (a game
+    // that ended, or a player who left), and must not start a watch then
+    const tracking = (this.trackingGeneration = (this.trackingGeneration || 0) + 1);
+
     // First get initial position
     this.getCurrentLocation((position) => {
+      if (tracking !== this.trackingGeneration) return;
+
       this.updatePlayerLocation(position);
 
       // Then start watching position
@@ -341,7 +358,9 @@ const GameMap = {
 
   // Stop tracking player location
   stopLocationTracking: function () {
-    if (this.watchPositionId) {
+    this.trackingGeneration = (this.trackingGeneration || 0) + 1;
+
+    if (this.watchPositionId !== null && this.watchPositionId !== undefined) {
       navigator.geolocation.clearWatch(this.watchPositionId);
       this.watchPositionId = null;
     }
@@ -393,6 +412,17 @@ const GameMap = {
       return;
     }
 
+    // The lobby is updated every time someone comes or goes, and the map only
+    // needs drawing once per target area
+    const key = `${centerLat},${centerLng},${targetAreaRadius}`;
+
+    if (this.lobbyMap && this.lobbyMapKey === key) {
+      this.lobbyMap.invalidateSize();
+      return;
+    }
+
+    this.lobbyMapKey = key;
+
     // If map already exists, remove it
     if (this.lobbyMap) {
       this.lobbyMap.remove();
@@ -433,7 +463,7 @@ const GameMap = {
     L.marker([centerLat, centerLng]).addTo(this.lobbyMap);
 
     // Add game boundary circle
-    L.circle([centerLat, centerLng], {
+    const area = L.circle([centerLat, centerLng], {
       radius: targetAreaRadius,
       color: "#999999", // Light enough to see on the dark map
       fillColor: "#ffffff",
@@ -442,16 +472,22 @@ const GameMap = {
       dashArray: "5, 10",
     }).addTo(this.lobbyMap);
 
+    // The map can't be moved or zoomed, so frame the whole target area
+    const frameArea = () => {
+      if (!this.lobbyMap) return;
+      this.lobbyMap.invalidateSize();
+      this.lobbyMap.fitBounds(area.getBounds().pad(0.25));
+    };
+    frameArea();
+
     // Disable interactions for simplicity
     this.lobbyMap.dragging.disable();
     this.lobbyMap.touchZoom.disable();
     this.lobbyMap.doubleClickZoom.disable();
     this.lobbyMap.scrollWheelZoom.disable();
 
-    // Force map to update size again after a delay
-    setTimeout(() => {
-      this.lobbyMap.invalidateSize();
-    }, 300);
+    // Frame it again once the lobby screen has laid itself out
+    setTimeout(frameArea, 300);
   },
 
   // Update player's location on map
@@ -712,7 +748,9 @@ const GameMap = {
     marker.setOpacity(Math.max(0.8, 1 - (secondsAgo / 300) * 0.2));
     marker.getPopup().setContent(this.playerPopupContent(player, timeAgo));
     const shield = this.shieldLabel(playerId);
-    this.setLabelText(this.runnerLabels[playerId], `${player.username}${shield ? shield.badge : ""}: ${timeAgo} ago`);
+    // Name on top and how long ago underneath, so a long name doesn't
+    // stretch the label across the map
+    this.setLabelText(this.runnerLabels[playerId], `${player.username}${shield ? shield.badge : ""}\n${timeAgo} ago`);
 
     const trail = this.runnerTrails[playerId];
     if (!trail) return;
@@ -857,8 +895,13 @@ const GameMap = {
   shieldLabel: function (playerId) {
     const player = this.shieldStates[playerId];
 
-    if (!player || player.team !== "runner" || player.status === "won") {
+    if (!player || player.team !== "runner") {
       return null;
+    }
+
+    // Stays where they finished, since they stop sharing where they are
+    if (player.status === "won") {
+      return { badge: " 🏁", detail: "Made it home - this is where they finished" };
     }
 
     const shield = zoneUtils.shieldState({ shieldActive: player.shieldActive, immunityUntil: player.immunityUntil }, Date.now());
@@ -901,6 +944,7 @@ const GameMap = {
     L.control.scale({ metric: true, imperial: false, position: "bottomleft" }).addTo(this.reviewMap);
 
     const points = [];
+    const labels = [];
 
     // The area the hunters picked, and never saw inside
     if (review.targetArea) {
@@ -925,16 +969,7 @@ const GameMap = {
         weight: 2,
       }).addTo(this.reviewMap);
 
-      L.marker([review.finalZone.lat, review.finalZone.lng], {
-        icon: L.divIcon({
-          className: "review-label-container",
-          html: this.reviewLabel("Final zone", null),
-          iconSize: [120, 18],
-          iconAnchor: [60, -8],
-        }),
-        interactive: false,
-      }).addTo(this.reviewMap);
-
+      labels.push({ at: [review.finalZone.lat, review.finalZone.lng], element: this.reviewLabel("Final zone", null) });
       points.push([review.finalZone.lat, review.finalZone.lng]);
     }
 
@@ -943,23 +978,85 @@ const GameMap = {
       outcomes[player.playerId] = player.outcome;
     });
 
-    Object.values(review.trails || {}).forEach((runner, index) => {
-      this.renderReviewTrail(runner, outcomes[runner.playerId], review.gameStartTime, index).forEach((point) => points.push(point));
+    Object.values(review.trails || {}).forEach((runner) => {
+      const trail = this.renderReviewTrail(runner, review.gameStartTime);
+      trail.forEach((point) => points.push(point));
+
+      // Where their game ended
+      const end = trail[trail.length - 1];
+
+      if (end) {
+        labels.push({ at: end, element: this.reviewLabel(runner.username, outcomes[runner.playerId], this.runnerColor(runner.colorIndex)) });
+      }
     });
 
+    // Room at the sides for a label centred on a runner who finished near the
+    // edge, and more below, where the labels hang
     if (points.length > 0) {
-      this.reviewMap.fitBounds(L.latLngBounds(points).pad(0.2));
+      this.reviewMap.fitBounds(L.latLngBounds(points).pad(0.1), { paddingTopLeft: [72, 30], paddingBottomRight: [72, 80] });
     } else if (review.targetArea) {
       this.reviewMap.setView([review.targetArea.lat, review.targetArea.lng], 14);
     }
+
+    // Placed once the map is framed, so they can be kept clear of each other
+    this.placeReviewLabels(labels);
 
     // Leaflet needs telling once the screen it sits on is actually visible
     setTimeout(() => this.reviewMap && this.reviewMap.invalidateSize(), 100);
   },
 
-  // One runner's whole game, in their colour. The label index stacks the end
-  // labels, since runners tend to finish in much the same place.
-  renderReviewTrail: function (runner, outcome, gameStartTime, labelIndex = 0) {
+  // Runners tend to finish in much the same place, often right by the final
+  // zone's own label. A label that would land on one already placed drops just
+  // below it instead, judged on screen at the zoom the replay opens at; anyone
+  // who finished on their own keeps their label right beside them.
+  placeReviewLabels: function (labels) {
+    const placed = [];
+
+    labels.forEach((label) => {
+      L.marker(label.at, {
+        icon: L.divIcon({
+          className: "review-label-container",
+          html: label.element,
+          iconSize: [140, 18],
+          iconAnchor: [70, -8],
+        }),
+        interactive: false,
+        zIndexOffset: 900,
+      }).addTo(this.reviewMap);
+
+      const at = this.reviewMap.latLngToContainerPoint(label.at);
+      const width = label.element.offsetWidth || 140;
+      const height = label.element.offsetHeight || 18;
+      const naturalTop = at.y + 8;
+      let top = naturalTop;
+
+      // Every move is downwards, so this always settles
+      let moved = true;
+      while (moved) {
+        moved = false;
+
+        placed.forEach((other) => {
+          const overlapsAcross = Math.abs(other.x - at.x) < (other.width + width) / 2;
+          const overlapsDown = top < other.top + other.height + 2 && top + height > other.top - 2;
+
+          if (overlapsAcross && overlapsDown) {
+            top = other.top + other.height + 2;
+            moved = true;
+          }
+        });
+      }
+
+      if (top !== naturalTop) {
+        label.element.style.transform = `translateY(${top - naturalTop}px)`;
+      }
+
+      placed.push({ x: at.x, top, width, height });
+    });
+  },
+
+  // One runner's whole game, in their colour. Returns the points it passed
+  // through, the last of them where their game ended.
+  renderReviewTrail: function (runner, gameStartTime) {
     const color = this.runnerColor(runner.colorIndex);
     const sightings = (runner.trail && runner.trail.sightings) || [];
     const points = [];
@@ -1005,22 +1102,6 @@ const GameMap = {
         .addTo(this.reviewMap);
     });
 
-    // Where their game ended
-    const last = points[points.length - 1];
-
-    if (last) {
-      L.marker(last, {
-        icon: L.divIcon({
-          className: "review-label-container",
-          html: this.reviewLabel(runner.username, outcome, color),
-          iconSize: [140, 18],
-          iconAnchor: [70, -8 - labelIndex * 20],
-        }),
-        interactive: false,
-        zIndexOffset: 900,
-      }).addTo(this.reviewMap);
-    }
-
     return points;
   },
 
@@ -1034,7 +1115,9 @@ const GameMap = {
     }
 
     const outcomeText = outcome && typeof UI !== "undefined" && UI.outcomeLabel ? UI.outcomeLabel(outcome).text : null;
-    label.textContent = outcomeText ? `${name} - ${outcomeText}` : name;
+    // Name, and how they finished underneath, so a long name doesn't stretch
+    // the label across the map
+    label.textContent = outcomeText ? `${name}\n${outcomeText}` : name;
 
     return label;
   },

@@ -26,7 +26,7 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 ### How the Game Works
 
 **Target Area Setup:**
-- Hunters pick a target area: a central location (typically the starting location) and a radius, 500m by default
+- Hunters pick a target area: a central location (typically the starting location) and a radius, 400m by default
 - The target area decides one thing only - where the final zone may be hidden. It does not bound the zones, the players, or how far the game ranges
 - When the game starts, one final zone is hidden at a random point inside that area. It is the same final zone for every Runner, and nobody is told where it is - not the Hunters, and not the Runners
 - Each Runner is led to it by their own chain of zones, so no two Runners are shown the same circles
@@ -53,7 +53,7 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 **For Runners:**
 - Navigate through a series of nested zones that progressively reveal the final zone everyone is racing for
 - The header shows the zone you are on, the countdown to its window opening or closing, your shield, and how long is left in the game
-- Your location pings to Hunters every 30 seconds while the app is open
+- While your app is open your location is shared live with everyone in the game (on every GPS update, and at least every 30 seconds); while it is closed, nothing is shared
 - You can see where other Runners and Hunters have pinged on the map
 - **Strategy:** Capture a zone early in its window and you get the next zone revealed while you still have time to walk to it
 - **Warning:** Laying low is how you miss a window - keep an eye on the countdown
@@ -66,9 +66,18 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 - A Runner's first catch only takes their shield and leaves them briefly immune, so check the player list for who still has one
 - Runners who go out - caught or timed out on a zone - become Hunters, growing your team
 
+### Rooms, Leaving and Reconnecting
+
+- The host creates the room (joining as a Hunter) and is the only one who can start the game, which needs at least one Runner. The host can also remove players from the lobby
+- Room names and player names ignore capitals. A name belongs to one player: a name already in use by someone with the app open is refused, and one whose app is closed can be taken back from another phone
+- **Closing the app, losing signal or a phone sleeping never takes anyone out.** The app reconnects by itself and picks up where it left off, and the lobby shows who is away. The game clock carries on regardless, so zone windows still close
+- **Leave Lobby** removes a player from the room. A host who leaves hands the room to whoever has been in it longest (preferring someone whose app is open); the last player out closes the room and frees its name
+- **Leave Game** mid-game is final: a Runner who leaves is out ("Left the game"), which counts towards the game ending. They can rejoin by name, as a Hunter
+- Players can join a game already under way. A Runner who does starts with a full shield on whichever zone the clock is on. Nobody new can join once the game is over
+
 ### Winning
 
-- **Runners win individually:** Each Runner who captures the final zone within its window is marked as having "won" - multiple Runners can win!
+- **Runners win individually:** Each Runner who captures the final zone within its window is marked as having "won" - multiple Runners can win! The game carries on for everyone else. A Runner who has won stops sharing their location and stays on the map where they finished (marked 🏁), and can't be caught
 - **Hunters win as a team:** If all Runners are out before any reach their final target, Hunters win together
 - **The clock:** When the final zone's window closes the game is over, and any Runner still short of it has run out of road
 - **Afterwards:** The game over screen says how everyone finished, and "Replay the Map" opens the whole game - every Runner's movements, and the final zone revealed at last

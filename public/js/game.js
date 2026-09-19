@@ -23,10 +23,18 @@ const Game = {
     statusTimer: null,
   },
 
+  // Whether a game is being played on this screen: GPS on, pings going out
+  running: false,
+
   // Initialize the game
   init: function (gameState, socket, initialState) {
     console.log("Initializing game with state:", initialState);
     console.log("Player is on team:", gameState.team);
+
+    // Starting over (a new game, or the same one after a reload) must not
+    // leave the last one's GPS watch, timers or microphone running
+    this.stop();
+    this.running = true;
 
     // Store references
     this.gameState = { ...initialState }; // Make sure we have the FULL game state
@@ -177,7 +185,16 @@ const Game = {
   // Emit location update to server
   emitLocationUpdate: function (lat, lng) {
     // Only send if we're in an active game
-    if (!this.socket || !this.gameState) return;
+    if (!this.running || !this.socket || !this.gameState) return;
+
+    // Nothing is sent while the connection is down or we are still rejoining:
+    // it would only be queued up and arrive before the server knew who we
+    // were. We send our position again as soon as we are back in.
+    if (typeof window.isInRoom === "function" && !window.isInRoom()) return;
+
+    // A runner who made it home stays where they finished on everyone's map
+    const me = this.getMyPlayer();
+    if (me && me.status === "won") return;
 
     // Emit location update
     this.socket.emit("location_update", {
@@ -192,6 +209,14 @@ const Game = {
 
     // Store new state
     this.gameState = { ...state };
+
+    // Our team can change without us hearing about it directly - miss two
+    // zones with the app closed and you come back a hunter
+    const me = this.getMyPlayer();
+
+    if (me && this.playerInfo && me.team !== this.playerInfo.team) {
+      this.updateTeamUI(me.team);
+    }
 
     // Update player lists in menu
     if (state.players) {
@@ -296,6 +321,15 @@ const Game = {
     if (!zoneContainer || !zoneValue || !zonesContainer || !zonesValue) return;
 
     const target = isRunner ? this.getMyTarget() : null;
+    const me = this.getMyPlayer();
+
+    // Home: no more zones, just the clock running down for everyone else
+    if (isRunner && me && me.status === "won") {
+      zoneContainer.style.display = "none";
+      zonesContainer.style.display = "block";
+      zonesValue.textContent = "🏁 Made it home";
+      return;
+    }
 
     // Hunters have no zones of their own, and neither has a runner who is out
     if (!target) {
@@ -342,7 +376,7 @@ const Game = {
     // Nothing to show once you are out of the game or have won it
     if (!isRunner || !player || player.status === "caught" || player.status === "won") {
       container.style.display = "none";
-      this.updateCaughtButton(null);
+      this.updateCaughtButton(null, player && player.status === "won");
       return;
     }
 
@@ -365,10 +399,12 @@ const Game = {
   },
 
   // Reporting yourself caught is pointless while you are immune, and the server
-  // turns it down anyway
-  updateCaughtButton: function (shield) {
+  // turns it down anyway. A runner who has made it home can't be caught at all.
+  updateCaughtButton: function (shield, hidden = false) {
     const button = document.getElementById("caught-btn");
     if (!button) return;
+
+    button.style.display = hidden ? "none" : "";
 
     if (shield && shield.immune) {
       button.disabled = true;
@@ -395,12 +431,22 @@ const Game = {
 
       // Hunters are shown no zones, including the one they were just chasing
       GameMap.updateTargets([], "hunter");
+
+      // ...but they are shown the target area, like every other hunter
+      if (this.gameState && this.gameState.centralLocation) {
+        GameMap.showTargetArea(this.gameState.centralLocation.lat, this.gameState.centralLocation.lng, this.gameState.targetRadius);
+      }
     }
   },
 
-  // End the game
-  endGame: function (reason) {
-    // Clear timers
+  // Is a game being played on this screen right now, for this room?
+  isRunning: function (roomId) {
+    return Boolean(this.running && this.gameState && (!roomId || this.gameState.roomId === roomId));
+  },
+
+  // Stop everything a game in progress keeps running: pings, GPS, countdowns
+  // and voice chat. Safe to call when nothing is running.
+  stop: function () {
     if (this.timers.statusTimer) {
       clearInterval(this.timers.statusTimer);
       this.timers.statusTimer = null;
@@ -411,11 +457,18 @@ const Game = {
       this.timers.locationTimer = null;
     }
 
-    // Stop location tracking
     GameMap.stopLocationTracking();
 
-    // Clean up voice chat resources
-    this.cleanupVoiceChat();
+    if (this.running) {
+      this.cleanupVoiceChat();
+    }
+
+    this.running = false;
+  },
+
+  // End the game
+  endGame: function (reason) {
+    this.stop();
 
     // Show appropriate game over message
     let gameOverMessage;

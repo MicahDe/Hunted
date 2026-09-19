@@ -12,6 +12,7 @@ function initDatabase(db) {
     db.run(`CREATE TABLE IF NOT EXISTS rooms (
             room_id TEXT PRIMARY KEY,
             room_name TEXT UNIQUE,
+            host_player_id TEXT,
             game_duration INTEGER,
             catch_immunity INTEGER,
             game_start_time INTEGER,
@@ -41,6 +42,7 @@ function initDatabase(db) {
             last_lat REAL,
             last_lng REAL,
             last_ping_time INTEGER,
+            left_at INTEGER,
             FOREIGN KEY (room_id) REFERENCES rooms (room_id)
         )`);
 
@@ -104,6 +106,7 @@ function initDatabase(db) {
         game_start_time: "INTEGER",
         final_lat: "REAL",
         final_lng: "REAL",
+        host_player_id: "TEXT",
       },
     });
 
@@ -114,6 +117,7 @@ function initDatabase(db) {
         shield_lost_reason: "TEXT",
         immunity_until: "INTEGER",
         elimination_reason: "TEXT",
+        left_at: "INTEGER",
       },
     });
 

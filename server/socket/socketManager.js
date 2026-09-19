@@ -6,13 +6,50 @@ const config = require("../config/default");
 const voiceChatHandler = require("./voiceChatHandler");
 
 module.exports = function (io, db) {
-  // Track connected users
+  // Which room and player each open connection belongs to. A player can have
+  // more than one (a phone that reconnected before the old connection timed
+  // out, say), and none at all while their app is closed - which is not the
+  // same as leaving.
   const connectedPlayers = new Map();
 
+  // Changes to a room are made one at a time. The handlers are async and every
+  // database call yields, so without this two requests racing each other - a
+  // join sent twice over a flaky connection, a catch landing on the same tick
+  // as a missed zone - could both act on the same stale read.
+  const roomLocks = new Map();
+
+  function withRoomLock(key, task) {
+    const previous = roomLocks.get(key) || Promise.resolve();
+    const run = previous.then(() => task());
+    const tail = run.catch(() => {});
+
+    roomLocks.set(key, tail);
+    tail.then(() => {
+      if (roomLocks.get(key) === tail) {
+        roomLocks.delete(key);
+      }
+    });
+
+    return run;
+  }
+
   // Zone windows close on the game clock whether or not anyone has their app
-  // open, so the server drives them rather than waiting for the next ping
+  // open, so the server drives them rather than waiting for the next ping. A
+  // slow tick is never overlapped by the next one, or a runner could be
+  // charged twice for the same missed window.
+  let processingSchedules = false;
+
   const scheduleTimer = setInterval(() => {
-    processZoneSchedules().catch((error) => console.error("Error processing zone schedules:", error));
+    if (processingSchedules) {
+      return;
+    }
+
+    processingSchedules = true;
+    processZoneSchedules()
+      .catch((error) => console.error("Error processing zone schedules:", error))
+      .finally(() => {
+        processingSchedules = false;
+      });
   }, config.game.scheduleTickInterval);
 
   // Never hold the process open for the tick
@@ -26,24 +63,45 @@ module.exports = function (io, db) {
     // Initialize voice chat handler for this socket connection
     voiceChatHandler(io, socket, connectedPlayers);
 
-    // Create a room
-    socket.on("create_room", async (data) => {
+    // Create a room, with its creator in it as the host. Doing both in one step
+    // means there is no second request to go missing or be sent twice.
+    socket.on("create_room", async (data = {}) => {
       try {
-        const { roomName, username, team, gameDuration, catchImmunity, targetRadius, centralLat, centralLng } = data;
-        let roomId;
+        const roomName = cleanName(data.roomName);
+        const username = cleanName(data.username);
+        const problem = nameProblem(roomName, username);
 
-        // Create new room
-        roomId = uuidv4();
-        const settings = await createRoom(roomId, roomName, { gameDuration, catchImmunity, centralLat, centralLng, targetRadius });
+        if (problem) {
+          return socket.emit("error", { message: problem });
+        }
 
-        return socket.emit("room_created", {
-          roomId,
-          roomName,
-          gameDuration: settings.gameDuration,
-          catchImmunity: settings.catchImmunity,
-          targetRadius,
-          centralLat,
-          centralLng,
+        const centralLat = coordinate(data.centralLat, 90);
+        const centralLng = coordinate(data.centralLng, 180);
+
+        if (centralLat === null || centralLng === null) {
+          return socket.emit("error", { message: "Tap the map to set the middle of the target area" });
+        }
+
+        // Two creates for the same name are settled one after the other
+        await withRoomLock(`create:${roomName.toLowerCase()}`, async () => {
+          if (await getRoom(roomName)) {
+            return socket.emit("error", { message: `A room called "${roomName}" already exists. Pick a different name.` });
+          }
+
+          const roomId = uuidv4();
+          const playerId = uuidv4();
+          const team = data.team === "runner" ? "runner" : "hunter";
+
+          await createRoom(roomId, roomName, playerId, {
+            gameDuration: data.gameDuration,
+            catchImmunity: data.catchImmunity,
+            centralLat,
+            centralLng,
+            targetRadius: data.targetRadius,
+          });
+          await createPlayer(playerId, roomId, username, team);
+
+          await withRoomLock(roomId, () => enterRoom(socket, roomId, playerId, { isNew: true }));
         });
       } catch (error) {
         console.error("Error creating room:", error);
@@ -51,133 +109,183 @@ module.exports = function (io, db) {
       }
     });
 
-    // Join a room
-    socket.on("join_room", async (data) => {
+    // Join a room by name, from the join form
+    socket.on("join_room", async (data = {}) => {
       try {
-        const { roomName, username, team } = data;
-        let roomId, playerId;
+        const roomName = cleanName(data.roomName);
+        const username = cleanName(data.username);
+        const problem = nameProblem(roomName, username);
 
-        // Check if room exists
-        const room = await getRoom(roomName);
-        let playerTeam = team;
-
-        if (room) {
-          roomId = room.room_id;
-
-          // Check if player exists in this room
-          const player = await getPlayer(roomId, username);
-
-          if (player) {
-            // Player exists, reconnect
-            playerId = player.player_id;
-
-            // A runner who was caught is a hunter now, whatever team their saved
-            // session still thinks they are on
-            playerTeam = player.team;
-
-            // Update player status only if they haven't won or been caught
-            if (player.status !== "won" && player.status !== "caught") {
-              await updatePlayerStatus(playerId, "lobby");
-            }
-          } else {
-            // New player joining existing room
-            playerId = uuidv4();
-            await createPlayer(playerId, roomId, username, team);
-          }
-        } else {
-          return socket.emit("error", { message: "Room not found" });
+        if (problem) {
+          return socket.emit("error", { message: problem });
         }
 
-        // Join socket room
-        socket.join(roomId);
+        const found = await getRoom(roomName);
 
-        // Track player in connected players
-        connectedPlayers.set(socket.id, { roomId, playerId, username, team: playerTeam });
+        if (!found) {
+          return socket.emit("error", { message: `There's no room called "${roomName}". Check the name with your host.` });
+        }
 
-        // Send initial game state
-        const gameState = await getGameState(roomId, playerId);
-        socket.emit("game_state", gameState);
-
-        // Notify room about new player
-        io.to(roomId).emit("player_joined", {
-          playerId: playerId,
-          username,
-          team: playerTeam,
-          timestamp: Date.now(),
-        });
-
-        // Bring everyone else's state up to date with their own view of it
-        await broadcastGameState(roomId);
-
-        // Return player and room info
-        socket.emit("join_success", {
-          roomId,
-          playerId,
-          gameState,
-        });
+        const team = data.team === "runner" ? "runner" : "hunter";
+        await withRoomLock(found.room_id, () => joinByName(socket, found.room_id, username, team));
       } catch (error) {
         console.error("Error joining room:", error);
         socket.emit("error", { message: "Failed to join room" });
       }
     });
 
-    // Handle delete room
-    socket.on("delete_room", async (data) => {
+    // Pick up where a saved session left off: after a reload, a dropped
+    // connection, or the app being closed and opened again
+    socket.on("rejoin_room", async (data = {}) => {
       try {
-        const { roomId } = data;
-        console.log(`Attempting to delete room with ID: ${roomId}`);
-        const playerInfo = connectedPlayers.get(socket.id);
+        const { roomId, playerId } = data;
 
-        if (!playerInfo) {
+        if (typeof roomId !== "string" || typeof playerId !== "string") {
+          return socket.emit("rejoin_failed", { message: "That game could not be found." });
+        }
+
+        await withRoomLock(roomId, async () => {
+          const room = await getRoomById(roomId);
+
+          if (!room) {
+            return socket.emit("rejoin_failed", { message: "That room no longer exists." });
+          }
+
+          const player = await getPlayerById(playerId);
+
+          if (!player || player.room_id !== roomId || player.left_at) {
+            return socket.emit("rejoin_failed", { message: "You're no longer in that room." });
+          }
+
+          // Mid-game nothing about them has changed for anyone else. In the
+          // lobby everyone sees them come back from being away.
+          await enterRoom(socket, roomId, playerId, { isNew: false, broadcast: room.status === "lobby" });
+        });
+      } catch (error) {
+        console.error("Error rejoining room:", error);
+        socket.emit("error", { message: "Failed to rejoin the game" });
+      }
+    });
+
+    // Leave on purpose, as opposed to just closing the app. The client waits on
+    // the acknowledgement before it forgets the room.
+    socket.on("leave_room", async (data, ack) => {
+      const reply = typeof ack === "function" ? ack : typeof data === "function" ? data : () => {};
+
+      try {
+        const info = connectedPlayers.get(socket.id);
+
+        if (!info) {
+          return reply({ ok: true });
+        }
+
+        await withRoomLock(info.roomId, () => leaveRoom(socket));
+        reply({ ok: true });
+      } catch (error) {
+        console.error("Error leaving room:", error);
+        reply({ ok: false, message: "Failed to leave the room" });
+      }
+    });
+
+    // The host can take someone out of the lobby - a player who is not coming,
+    // or a name that was typed wrong
+    socket.on("remove_player", async (data = {}) => {
+      try {
+        const info = connectedPlayers.get(socket.id);
+
+        if (!info) {
+          return socket.emit("error", { message: "Player not found" });
+        }
+
+        await withRoomLock(info.roomId, async () => {
+          const room = await getRoomById(info.roomId);
+
+          if (!room || !isHost(room, info.playerId)) {
+            return socket.emit("error", { message: "Only the host can remove players" });
+          }
+
+          if (room.status !== "lobby") {
+            return socket.emit("error", { message: "Players can only be removed before the game starts" });
+          }
+
+          const player = await getPlayerById(data.playerId);
+
+          if (!player || player.room_id !== room.room_id) {
+            return socket.emit("error", { message: "That player isn't in this room" });
+          }
+
+          if (player.player_id === info.playerId) {
+            return socket.emit("error", { message: "Use Leave Lobby to leave the room yourself" });
+          }
+
+          await deletePlayer(player.player_id);
+
+          detachPlayer(player.player_id, "removed_from_room", { message: "The host removed you from the lobby." });
+
+          io.to(room.room_id).emit("player_left", {
+            playerId: player.player_id,
+            username: player.username,
+            removed: true,
+            timestamp: Date.now(),
+          });
+
+          await broadcastGameState(room.room_id);
+        });
+      } catch (error) {
+        console.error("Error removing player:", error);
+        socket.emit("error", { message: "Failed to remove that player" });
+      }
+    });
+
+    // Handle delete room
+    socket.on("delete_room", async (data = {}) => {
+      try {
+        const info = connectedPlayers.get(socket.id);
+
+        if (!info) {
           console.log(`Player not found for socket ID: ${socket.id}`);
           return socket.emit("error", { message: "Player not found" });
         }
 
-        // Verify player is the room creator
-        const room = await new Promise((resolve, reject) => {
-          db.get("SELECT * FROM rooms WHERE room_id = ?", [roomId], (err, row) => {
-            if (err) reject(err);
-            resolve(row);
+        const roomId = info.roomId;
+
+        await withRoomLock(roomId, async () => {
+          const room = await getRoomById(roomId);
+
+          if (!room) {
+            console.log(`Room not found with ID: ${roomId}`);
+            return socket.emit("error", { message: "Room not found" });
+          }
+
+          if (!isHost(room, info.playerId)) {
+            return socket.emit("error", { message: "Only the host can delete the lobby" });
+          }
+
+          if (room.status === "active") {
+            return socket.emit("error", { message: "The game is running, so the room can't be deleted now" });
+          }
+
+          // Everyone else hears about it; the host gets their own confirmation
+          socket.to(roomId).emit("room_deleted", {
+            roomId,
+            message: "Room has been deleted by the host",
           });
-        });
 
-        if (!room) {
-          console.log(`Room not found with ID: ${roomId}`);
-          return socket.emit("error", { message: "Room not found" });
-        }
+          await deleteRoom(roomId);
 
-        // Get all players in the room
-        const playersInRoom = [];
-        connectedPlayers.forEach((player, socketId) => {
-          if (player.roomId === roomId) {
-            playersInRoom.push({
-              socketId,
-              playerId: player.playerId,
-            });
-          }
-        });
+          connectedPlayers.forEach((player, socketId) => {
+            if (player.roomId === roomId) {
+              const playerSocket = io.sockets.sockets.get(socketId);
+              if (playerSocket) {
+                playerSocket.leave(roomId);
+              }
+              connectedPlayers.delete(socketId);
+            }
+          });
 
-        // Notify all players in the room
-        io.to(roomId).emit("room_deleted", {
-          roomId,
-          message: "Room has been deleted by the host",
-        });
-
-        // Delete room from database
-        await deleteRoom(roomId);
-
-        // Disconnect all players from the room
-        playersInRoom.forEach((player) => {
-          const playerSocket = io.sockets.sockets.get(player.socketId);
-          if (playerSocket) {
-            playerSocket.leave(roomId);
-            connectedPlayers.delete(player.socketId);
-          }
-        });
-
-        // Confirm deletion to the host
-        socket.emit("delete_success", {
-          message: "Room deleted successfully",
+          socket.emit("delete_success", {
+            message: "Room deleted successfully",
+          });
         });
       } catch (error) {
         console.error("Error deleting room:", error);
@@ -186,64 +294,16 @@ module.exports = function (io, db) {
     });
 
     // Handle start game
-    socket.on("start_game", async (data) => {
+    socket.on("start_game", async () => {
       try {
-        console.log("Received start_game event:", data);
-        const { roomId } = data;
-        const playerInfo = connectedPlayers.get(socket.id);
+        const info = connectedPlayers.get(socket.id);
 
-        if (!playerInfo) {
+        if (!info) {
           console.error("Player not found when starting game");
           return socket.emit("error", { message: "Player not found" });
         }
 
-        const room = await getRoomById(roomId);
-
-        if (!room) {
-          return socket.emit("error", { message: "Room not found" });
-        }
-
-        // Start the game clock and hide the final zone somewhere in the play
-        // area. Both have to be settled before any targets are generated.
-        console.log("Starting the game clock for room:", roomId);
-        await startRoom(room, Date.now());
-
-        // Generate targets for all runners in the room. Runners who haven't
-        // pinged yet still get one - their first zone window is already running.
-        const runners = await getTeamPlayers(roomId, "runner");
-        console.log(`Found ${runners.length} runners for initial target generation`);
-
-        for (const runner of runners) {
-          // Everyone starts the game playing, with a full shield
-          await updatePlayerStatus(runner.player_id, "active");
-          await resetShield(runner.player_id);
-
-          // Generate a target for this runner
-          const target = await generateTargetForPlayer(roomId, runner.player_id);
-
-          if (target) {
-            console.log(`Generated initial target for runner ${runner.player_id}`);
-
-            // Find the socket for this player
-            for (const [socketId, info] of connectedPlayers.entries()) {
-              if (info.playerId === runner.player_id) {
-                const playerSocket = io.sockets.sockets.get(socketId);
-                if (playerSocket) {
-                  // Notify player of their new target
-                  playerSocket.emit("new_target", {
-                    target,
-                    gameState: await getGameState(roomId, runner.player_id),
-                  });
-                  break;
-                }
-              }
-            }
-          }
-        }
-
-        // Notify all players in room, each with their own view of the game
-        console.log("Notifying all players in room about game start");
-        await broadcastToPlayers(roomId, "game_started", (gameState) => ({ gameState }));
+        await withRoomLock(info.roomId, () => startGame(socket, info));
       } catch (error) {
         console.error("Error starting game:", error);
         socket.emit("error", { message: "Failed to start game" });
@@ -251,181 +311,79 @@ module.exports = function (io, db) {
     });
 
     // Handle location updates
-    socket.on("location_update", async (data) => {
+    socket.on("location_update", async (data = {}) => {
       try {
-        const { lat, lng } = data;
-        const playerInfo = connectedPlayers.get(socket.id);
+        const info = connectedPlayers.get(socket.id);
 
-        if (!playerInfo) {
-          return socket.emit("error", { message: "Player not found" });
+        // A ping that arrives before a reconnecting phone has rejoined its room
+        // has nowhere to go. The next one will, so there is nothing to report.
+        if (!info) {
+          return;
         }
 
-        const { roomId, playerId, username, team } = playerInfo;
-        const now = Date.now();
+        const lat = coordinate(data.lat, 90);
+        const lng = coordinate(data.lng, 180);
 
-        // Update player location in database
-        await updatePlayerLocation(playerId, lat, lng);
-
-        // If player is runner, store location history and broadcast to hunters
-        if (team === "runner") {
-          // Store location in history
-          await storeLocationHistory(playerId, roomId, lat, lng);
-
-          // Broadcast runner location to all players in the room
-          const locationData = {
-            playerId,
-            username,
-            team: "runner",
-            location: {
-              lat,
-              lng,
-            },
-            lastPingTime: now,
-            colorIndex: getRunnerColorIndexes(await getRoomPlayers(roomId))[playerId],
-            trail: await getRunnerTrail(playerId, { lat, lng, timestamp: now }),
-          };
-
-          io.to(roomId).emit("runner_location", locationData);
-
-          // Check for target discovery for runners
-          console.log(`Checking target discovery for runner ${playerId} at location ${lat}, ${lng}`);
-
-          const targetResult = await checkTargetDiscovery(roomId, playerId, lat, lng);
-
-          if (targetResult) {
-            console.log(`Target result for ${playerId}:`, targetResult);
-
-            // Get player info
-            const playerData = await getPlayerById(playerId);
-
-            // Handle different target results
-
-            // Case 1: Player captured their final zone and won
-            if (targetResult.reachedTarget) {
-              console.log(`Player ${playerId} reached target ${targetResult.reachedTarget.targetId}`);
-
-              // The room hears about it as runner_won; this is the winner's own copy
-              socket.emit("target_reached", {
-                targetId: targetResult.reachedTarget.targetId,
-                location: targetResult.reachedTarget.location,
-                playerId,
-                username: playerData.username,
-                gameState: await getGameState(roomId, playerId),
-              });
-            }
-            // Case 2: Player captured the zone, so the next one is revealed
-            else if (targetResult.updatedTarget) {
-              console.log(`Player ${playerId} captured zone ${targetResult.updatedTarget.capturedZoneNumber}, revealing the next one`);
-
-              // Notify just this player about the captured zone
-              socket.emit("zone_captured", {
-                targetId: targetResult.updatedTarget.targetId,
-                location: targetResult.updatedTarget.location,
-                radiusLevel: targetResult.updatedTarget.radiusLevel,
-                zoneNumber: targetResult.updatedTarget.zoneNumber,
-                capturedZoneNumber: targetResult.updatedTarget.capturedZoneNumber,
-                zoneStatus: targetResult.updatedTarget.zoneStatus,
-                windowOpenTime: targetResult.updatedTarget.windowOpenTime,
-                windowCloseTime: targetResult.updatedTarget.windowCloseTime,
-                gameState: await getGameState(roomId, playerId),
-              });
-            }
-            // Case 3: New target was generated for player
-            else if (targetResult.isNew && targetResult.target) {
-              console.log(`New target ${targetResult.target.targetId} generated for player ${playerId}`);
-
-              // Notify just this player about the new target
-              socket.emit("new_target", {
-                target: targetResult.target,
-                gameState: await getGameState(roomId, playerId),
-              });
-            }
-          }
-        } else if (team === "hunter") {
-          const locationData = {
-            playerId,
-            username,
-            team: "hunter",
-            location: {
-              lat,
-              lng,
-            },
-            lastPingTime: now,
-            trail: null,
-          };
-
-          io.to(roomId).emit("runner_location", locationData);
+        if (lat === null || lng === null) {
+          return;
         }
+
+        await withRoomLock(info.roomId, () => handleLocation(socket, lat, lng));
       } catch (error) {
         console.error("Error handling location update:", error);
-        socket.emit("error", { message: "Error updating location" });
       }
     });
 
     // Handle player caught event
-    socket.on("player_caught", async (data) => {
+    socket.on("player_caught", async (data = {}) => {
       try {
-        const { caughtPlayerId } = data;
-        const playerInfo = connectedPlayers.get(socket.id);
+        const info = connectedPlayers.get(socket.id);
 
-        if (!playerInfo) {
+        if (!info) {
           return socket.emit("error", { message: "Player not found" });
         }
 
-        const { roomId } = playerInfo;
-        const room = await getRoomById(roomId);
-
-        if (!room) {
-          return socket.emit("error", { message: "Room not found" });
-        }
-
-        const caughtPlayer = await getPlayerById(caughtPlayerId);
-
-        if (!caughtPlayer || caughtPlayer.team !== "runner") {
-          return socket.emit("error", { message: "That player is not a runner" });
-        }
-
-        // A runner whose shield just took a catch is briefly safe, so the hunter
-        // who caught them can't immediately catch them again
-        const shield = zoneUtils.shieldState({ shieldActive: caughtPlayer.shield_active, immunityUntil: caughtPlayer.immunity_until }, Date.now());
-
-        if (shield.immune) {
-          return socket.emit("catch_rejected", {
-            playerId: caughtPlayerId,
-            username: caughtPlayer.username,
-            immunityUntil: caughtPlayer.immunity_until,
-          });
-        }
-
-        // The first catch costs the shield, the second puts them out
-        await applyStrike(roomId, caughtPlayerId, "caught", roomSchedule(room));
-
-        await broadcastGameState(roomId);
-        await checkForGameOver(roomId);
+        await withRoomLock(info.roomId, () => reportCatch(socket, info, data.caughtPlayerId));
       } catch (error) {
         console.error("Error handling caught player:", error);
       }
     });
 
-    // Handle disconnect
+    // Closing the app, losing signal or the phone going to sleep all end up
+    // here. None of them take a player out of the game: they are just away
+    // until they reconnect.
     socket.on("disconnect", async () => {
-      const playerInfo = connectedPlayers.get(socket.id);
+      console.log(`Socket disconnected: ${socket.id}`);
 
-      if (playerInfo) {
-        const { roomId, playerId } = playerInfo;
+      try {
+        const info = connectedPlayers.get(socket.id);
 
-        // Remove from connected players
+        if (!info) {
+          return;
+        }
+
         connectedPlayers.delete(socket.id);
 
-        // Notify room
-        io.to(roomId).emit("player_disconnected", {
-          playerId,
-          username: playerInfo.username,
+        // Still here on another connection, so nobody needs telling
+        if (isPlayerConnected(info.playerId)) {
+          return;
+        }
+
+        io.to(info.roomId).emit("player_disconnected", {
+          playerId: info.playerId,
+          username: info.username,
           timestamp: Date.now(),
         });
-      }
 
-      console.log(`Socket disconnected: ${socket.id}`);
+        // The lobby shows who is actually here
+        const room = await getRoomById(info.roomId);
+
+        if (room && room.status === "lobby") {
+          await broadcastGameState(info.roomId);
+        }
+      } catch (error) {
+        console.error("Error handling disconnect:", error);
+      }
     });
 
     // A look back over the game once it is done: where everyone went, how they
@@ -452,25 +410,472 @@ module.exports = function (io, db) {
       }
     });
 
-    socket.on("resync_game_state", async (data) => {
+    socket.on("resync_game_state", async () => {
       try {
-        const { roomId } = data;
-        console.log(`Fetching game state for room: ${roomId}`);
-
         const playerInfo = connectedPlayers.get(socket.id);
+
+        // Not in a room (yet): a reconnecting phone rejoins by itself
         if (!playerInfo) {
-          return socket.emit("error", { message: "Player not found" });
+          return;
         }
 
-        // Get game state specific to this player
-        const gameState = await getGameState(roomId, playerInfo.playerId);
-        socket.emit("game_state", gameState);
+        // Get game state specific to this player, for the room they are in
+        // rather than whichever one the client last thought it was in
+        const gameState = await getGameState(playerInfo.roomId, playerInfo.playerId);
+
+        if (gameState) {
+          socket.emit("game_state", gameState);
+        }
       } catch (error) {
         console.error("Error getting game state:", error);
         socket.emit("error", { message: "Failed to get game state" });
       }
     });
   });
+
+  // A latitude or longitude, or null for anything that isn't one. Number()
+  // alone would read a missing value as 0, which is a real place.
+  function coordinate(value, limit) {
+    if (typeof value !== "number" && (typeof value !== "string" || value.trim() === "")) {
+      return null;
+    }
+
+    const number = Number(value);
+    return Number.isFinite(number) && Math.abs(number) <= limit ? number : null;
+  }
+
+  // Names come from a text box, so tidy the whitespace people leave in them
+  function cleanName(value) {
+    return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+  }
+
+  function nameProblem(roomName, username) {
+    if (!roomName || !username) {
+      return "Room name and username are required";
+    }
+
+    if (roomName.length > config.security.maxRoomNameLength) {
+      return `Room names can be at most ${config.security.maxRoomNameLength} characters`;
+    }
+
+    if (username.length > config.security.maxUsernameLength) {
+      return `Usernames can be at most ${config.security.maxUsernameLength} characters`;
+    }
+
+    return null;
+  }
+
+  // Rooms made before the server kept track of a host let anyone in them host
+  function isHost(room, playerId) {
+    return !room.host_player_id || room.host_player_id === playerId;
+  }
+
+  // Is this player here on any connection other than the one given?
+  function isPlayerConnected(playerId, exceptSocketId = null) {
+    for (const [socketId, info] of connectedPlayers.entries()) {
+      if (info.playerId === playerId && socketId !== exceptSocketId) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // Tie a connection to a player in a room. A connection is only ever in one
+  // room, so anything it was in before is left first.
+  function attachSocket(socket, room, player) {
+    const previous = connectedPlayers.get(socket.id);
+
+    if (previous && previous.roomId !== room.room_id) {
+      connectedPlayers.delete(socket.id);
+      socket.leave(previous.roomId);
+
+      if (!isPlayerConnected(previous.playerId)) {
+        io.to(previous.roomId).emit("player_disconnected", {
+          playerId: previous.playerId,
+          username: previous.username,
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    socket.join(room.room_id);
+    connectedPlayers.set(socket.id, {
+      roomId: room.room_id,
+      playerId: player.player_id,
+      username: player.username,
+      team: player.team,
+    });
+  }
+
+  // Cut every connection a player has to their room, telling each why
+  function detachPlayer(playerId, event, payload) {
+    connectedPlayers.forEach((info, socketId) => {
+      if (info.playerId !== playerId) {
+        return;
+      }
+
+      connectedPlayers.delete(socketId);
+
+      const playerSocket = io.sockets.sockets.get(socketId);
+
+      if (playerSocket) {
+        playerSocket.leave(info.roomId);
+
+        if (event) {
+          playerSocket.emit(event, payload);
+        }
+      }
+    });
+  }
+
+  // Put a connection in the room as the given player and bring everyone up to
+  // date. Only a player joining for the first time is announced; somebody
+  // coming back after a dropped connection just quietly reappears.
+  async function enterRoom(socket, roomId, playerId, { isNew, broadcast = true }) {
+    const room = await getRoomById(roomId);
+    const player = await getPlayerById(playerId);
+
+    attachSocket(socket, room, player);
+
+    const gameState = await getGameState(roomId, playerId);
+
+    socket.emit("join_success", {
+      roomId,
+      playerId,
+      gameState,
+    });
+
+    if (isNew) {
+      socket.to(roomId).emit("player_joined", {
+        playerId,
+        username: player.username,
+        team: player.team,
+        timestamp: Date.now(),
+      });
+    }
+
+    if (broadcast) {
+      await broadcastGameState(roomId, socket.id);
+    }
+  }
+
+  // The join form. A name already in the room is that player coming back -
+  // unless they are plainly still here on another phone, in which case it is
+  // somebody else who happened to pick the same name.
+  async function joinByName(socket, roomId, username, team) {
+    const room = await getRoomById(roomId);
+
+    if (!room) {
+      return socket.emit("error", { message: "Room not found" });
+    }
+
+    const existing = await getPlayer(roomId, username);
+
+    if (existing) {
+      const alreadyThisSocket = connectedPlayers.get(socket.id)?.playerId === existing.player_id;
+
+      if (!alreadyThisSocket && isPlayerConnected(existing.player_id, socket.id)) {
+        return socket.emit("error", {
+          message: `Someone called "${existing.username}" is already in this room. Pick a different name - or if that's you on another phone, close the app there first.`,
+        });
+      }
+
+      if (room.status === "lobby") {
+        // Nothing has started, so they can come back on whichever team they chose
+        await updatePlayerTeam(existing.player_id, team);
+
+        if (existing.status !== "won" && existing.status !== "caught") {
+          await updatePlayerStatus(existing.player_id, "lobby");
+        }
+      }
+
+      // Once the game is running their team is whatever the game made it: a
+      // runner who went out is a hunter now, whatever they picked
+      await clearLeft(existing.player_id);
+
+      return enterRoom(socket, roomId, existing.player_id, { isNew: false });
+    }
+
+    if (room.status === "completed") {
+      return socket.emit("error", { message: "That game has already finished." });
+    }
+
+    const playerId = uuidv4();
+    await createPlayer(playerId, roomId, username, team);
+
+    // A room from before hosts were tracked gets its first player as host
+    if (!room.host_player_id) {
+      await setRoomHost(roomId, playerId);
+    }
+
+    return enterRoom(socket, roomId, playerId, { isNew: true });
+  }
+
+  // Leaving on purpose. Before the game starts that is simply gone from the
+  // room. Mid-game a runner forfeits, since nobody should be left hunting a
+  // runner who has gone home, and after the game there is nothing to change.
+  async function leaveRoom(socket) {
+    const info = connectedPlayers.get(socket.id);
+
+    if (!info) {
+      return;
+    }
+
+    const { roomId, playerId } = info;
+    const room = await getRoomById(roomId);
+    const player = await getPlayerById(playerId);
+
+    connectedPlayers.delete(socket.id);
+    socket.leave(roomId);
+
+    // Once the game is over there is nothing left to change: they have just
+    // stopped looking at the results
+    if (!room || !player || room.status === "completed") {
+      return;
+    }
+
+    // Any other phone the player has open in the room goes with them
+    detachPlayer(playerId, "removed_from_room", { message: "You left this room on another device." });
+
+    if (room.status === "lobby") {
+      await deletePlayer(playerId);
+    } else {
+      await markLeft(playerId);
+
+      if (player.team === "runner" && player.status !== "won" && player.status !== "caught") {
+        await eliminatePlayer(playerId, "left");
+      }
+    }
+
+    const newHostId = isHost(room, playerId) ? await handOverHost(room, playerId) : null;
+
+    io.to(roomId).emit("player_left", {
+      playerId,
+      username: player.username,
+      newHostId,
+      timestamp: Date.now(),
+    });
+
+    // A lobby nobody is left in is finished with, and its name is free again
+    if (room.status === "lobby" && (await getRoomPlayers(roomId)).length === 0) {
+      console.log(`Room ${roomId} is empty, deleting it`);
+      await deleteRoom(roomId);
+      return;
+    }
+
+    await broadcastGameState(roomId);
+
+    if (room.status === "active") {
+      await checkForGameOver(roomId);
+    }
+  }
+
+  // The host has gone, so hand the room to whoever has been in it longest,
+  // preferring someone who is actually here
+  async function handOverHost(room, leavingPlayerId) {
+    const candidates = (await getRoomPlayers(room.room_id)).filter((player) => player.player_id !== leavingPlayerId && !player.left_at);
+    const next = candidates.find((player) => isPlayerConnected(player.player_id)) || candidates[0] || null;
+
+    await setRoomHost(room.room_id, next ? next.player_id : null);
+
+    return next ? next.player_id : null;
+  }
+
+  async function startGame(socket, info) {
+    const room = await getRoomById(info.roomId);
+
+    if (!room) {
+      return socket.emit("error", { message: "Room not found" });
+    }
+
+    if (!isHost(room, info.playerId)) {
+      return socket.emit("error", { message: "Only the host can start the game" });
+    }
+
+    // A second tap on Start, or one that was held up by a bad connection, must
+    // not restart a game that is already running: that would hide a new final
+    // zone that none of the runners' zones lead to
+    if (room.status === "active") {
+      return socket.emit("game_started", { gameState: await getGameState(room.room_id, info.playerId) });
+    }
+
+    if (room.status !== "lobby") {
+      return socket.emit("error", { message: "That game has already finished." });
+    }
+
+    const runners = await getTeamPlayers(room.room_id, "runner");
+
+    if (runners.length === 0) {
+      return socket.emit("error", { message: "At least one Runner has to join before the game can start." });
+    }
+
+    // Start the game clock and hide the final zone somewhere in the target
+    // area. Both have to be settled before any zones are generated.
+    console.log("Starting the game clock for room:", room.room_id);
+    await startRoom(room, Date.now());
+
+    // Every runner gets their first zone now, whether or not their app is open:
+    // their first zone window is already running
+    for (const runner of runners) {
+      // Everyone starts the game playing, with a full shield
+      await updatePlayerStatus(runner.player_id, "active");
+      await resetShield(runner.player_id);
+      await generateTargetForPlayer(room.room_id, runner.player_id);
+    }
+
+    // Notify all players in room, each with their own view of the game
+    console.log("Notifying all players in room about game start");
+    await broadcastToPlayers(room.room_id, "game_started", (gameState) => ({ gameState }));
+  }
+
+  async function handleLocation(socket, lat, lng) {
+    // Re-read under the room lock: the player may have left, or gone out and
+    // become a hunter, while this ping was waiting
+    const info = connectedPlayers.get(socket.id);
+
+    if (!info) {
+      return;
+    }
+
+    const { roomId, playerId, username, team } = info;
+    const room = await getRoomById(roomId);
+
+    // Locations only count while the game is being played
+    if (!room || room.status !== "active") {
+      return;
+    }
+
+    // A runner who has made it home stays on the map where they finished.
+    // Sharing where they are now would only show everyone where the final zone
+    // is, since that is where they are standing.
+    const player = await getPlayerById(playerId);
+
+    if (!player || player.status === "won") {
+      return;
+    }
+
+    const now = Date.now();
+
+    // Update player location in database
+    await updatePlayerLocation(playerId, lat, lng);
+
+    if (team === "hunter") {
+      io.to(roomId).emit("runner_location", {
+        playerId,
+        username,
+        team: "hunter",
+        location: { lat, lng },
+        lastPingTime: now,
+        trail: null,
+      });
+      return;
+    }
+
+    // Runners leave a trail, and might just have captured their zone
+    await storeLocationHistory(playerId, roomId, lat, lng);
+
+    io.to(roomId).emit("runner_location", {
+      playerId,
+      username,
+      team: "runner",
+      location: { lat, lng },
+      lastPingTime: now,
+      colorIndex: getRunnerColorIndexes(await getRoomPlayers(roomId))[playerId],
+      trail: await getRunnerTrail(playerId, { lat, lng, timestamp: now }),
+    });
+
+    const targetResult = await checkTargetDiscovery(roomId, playerId, lat, lng);
+
+    if (!targetResult) {
+      return;
+    }
+
+    console.log(`Target result for ${playerId}:`, targetResult);
+
+    // Case 1: Player captured their final zone and won
+    if (targetResult.reachedTarget) {
+      console.log(`Player ${playerId} reached target ${targetResult.reachedTarget.targetId}`);
+
+      // The room hears about it as runner_won; this is the winner's own copy
+      socket.emit("target_reached", {
+        targetId: targetResult.reachedTarget.targetId,
+        location: targetResult.reachedTarget.location,
+        playerId,
+        username,
+        gameState: await getGameState(roomId, playerId),
+      });
+    }
+    // Case 2: Player captured the zone, so the next one is revealed
+    else if (targetResult.updatedTarget) {
+      console.log(`Player ${playerId} captured zone ${targetResult.updatedTarget.capturedZoneNumber}, revealing the next one`);
+
+      socket.emit("zone_captured", {
+        targetId: targetResult.updatedTarget.targetId,
+        location: targetResult.updatedTarget.location,
+        radiusLevel: targetResult.updatedTarget.radiusLevel,
+        zoneNumber: targetResult.updatedTarget.zoneNumber,
+        capturedZoneNumber: targetResult.updatedTarget.capturedZoneNumber,
+        zoneStatus: targetResult.updatedTarget.zoneStatus,
+        windowOpenTime: targetResult.updatedTarget.windowOpenTime,
+        windowCloseTime: targetResult.updatedTarget.windowCloseTime,
+        gameState: await getGameState(roomId, playerId),
+      });
+    }
+    // Case 3: New target was generated for player
+    else if (targetResult.isNew && targetResult.target) {
+      console.log(`New target ${targetResult.target.targetId} generated for player ${playerId}`);
+
+      socket.emit("new_target", {
+        target: targetResult.target,
+        gameState: await getGameState(roomId, playerId),
+      });
+    }
+  }
+
+  // A runner reports themselves caught. Hunters could report catches too, but
+  // nobody can report a runner in another room, or another runner.
+  async function reportCatch(socket, info, caughtPlayerId) {
+    const room = await getRoomById(info.roomId);
+
+    if (!room) {
+      return socket.emit("error", { message: "Room not found" });
+    }
+
+    if (room.status !== "active") {
+      return socket.emit("error", { message: "The game isn't running" });
+    }
+
+    const caughtPlayer = await getPlayerById(caughtPlayerId);
+
+    if (!caughtPlayer || caughtPlayer.room_id !== room.room_id || caughtPlayer.team !== "runner") {
+      return socket.emit("error", { message: "That player is not a runner" });
+    }
+
+    const reporter = await getPlayerById(info.playerId);
+
+    if (!reporter || (reporter.player_id !== caughtPlayer.player_id && reporter.team !== "hunter")) {
+      return socket.emit("error", { message: "Only a hunter or the runner themselves can report a catch" });
+    }
+
+    // A runner whose shield just took a catch is briefly safe, so the hunter
+    // who caught them can't immediately catch them again
+    const shield = zoneUtils.shieldState({ shieldActive: caughtPlayer.shield_active, immunityUntil: caughtPlayer.immunity_until }, Date.now());
+
+    if (shield.immune) {
+      return socket.emit("catch_rejected", {
+        playerId: caughtPlayerId,
+        username: caughtPlayer.username,
+        immunityUntil: caughtPlayer.immunity_until,
+      });
+    }
+
+    // The first catch costs the shield, the second puts them out
+    await applyStrike(room.room_id, caughtPlayerId, "caught", roomSchedule(room));
+
+    await broadcastGameState(room.room_id);
+    await checkForGameOver(room.room_id);
+  }
 
   // Database helper functions
   async function deleteRoom(roomId) {
@@ -494,26 +899,64 @@ module.exports = function (io, db) {
           }
           console.log(`Successfully deleted targets for roomId: ${roomId}`);
 
-          // Delete room
-          console.log(`Deleting room with roomId: ${roomId}`);
-          db.run("DELETE FROM rooms WHERE room_id = ?", [roomId], function (err) {
+          db.run("DELETE FROM location_history WHERE room_id = ?", [roomId], function (err) {
             if (err) {
-              console.error("Error deleting room:", err);
+              console.error("Error deleting location history:", err);
               return reject(err);
             }
-            console.log(`Successfully deleted room with roomId: ${roomId}`);
-            resolve();
+
+            // Delete room
+            console.log(`Deleting room with roomId: ${roomId}`);
+            db.run("DELETE FROM rooms WHERE room_id = ?", [roomId], function (err) {
+              if (err) {
+                console.error("Error deleting room:", err);
+                return reject(err);
+              }
+              console.log(`Successfully deleted room with roomId: ${roomId}`);
+              resolve();
+            });
           });
         });
       });
     });
   }
 
+  // Room names are typed on phones, so "park" finds the room called "Park"
   async function getRoom(roomName) {
     return new Promise((resolve, reject) => {
-      db.get("SELECT * FROM rooms WHERE room_name = ?", [roomName], (err, row) => {
+      db.get("SELECT * FROM rooms WHERE room_name = ? COLLATE NOCASE ORDER BY start_time DESC LIMIT 1", [roomName], (err, row) => {
         if (err) reject(err);
         resolve(row);
+      });
+    });
+  }
+
+  async function setRoomHost(roomId, playerId) {
+    return runSql("UPDATE rooms SET host_player_id = ? WHERE room_id = ?", [playerId, roomId]);
+  }
+
+  // Gone from the lobby altogether, as if they had never joined
+  async function deletePlayer(playerId) {
+    await runSql("DELETE FROM targets WHERE player_id = ?", [playerId]);
+    await runSql("DELETE FROM location_history WHERE player_id = ?", [playerId]);
+    return runSql("DELETE FROM players WHERE player_id = ?", [playerId]);
+  }
+
+  // Left a game that is under way. Their row stays so the results and the
+  // replay still show how their game went.
+  async function markLeft(playerId) {
+    return runSql("UPDATE players SET left_at = ? WHERE player_id = ?", [Date.now(), playerId]);
+  }
+
+  async function clearLeft(playerId) {
+    return runSql("UPDATE players SET left_at = NULL WHERE player_id = ?", [playerId]);
+  }
+
+  function runSql(sql, params) {
+    return new Promise((resolve, reject) => {
+      db.run(sql, params, function (err) {
+        if (err) reject(err);
+        resolve(this.changes);
       });
     });
   }
@@ -527,14 +970,15 @@ module.exports = function (io, db) {
     });
   }
 
-  async function createRoom(roomId, roomName, settings) {
+  async function createRoom(roomId, roomName, hostPlayerId, settings) {
     const gameDuration = clamp(settings.gameDuration, 6, 240, config.game.defaultGameDuration);
     const catchImmunity = clamp(settings.catchImmunity, 0, 30, config.game.defaultCatchImmunity);
+    const targetRadius = clamp(settings.targetRadius, 100, 5000, config.game.defaultTargetAreaRadius);
 
     await new Promise((resolve, reject) => {
       db.run(
-        "INSERT INTO rooms (room_id, room_name, game_duration, catch_immunity, central_lat, central_lng, target_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [roomId, roomName, gameDuration, catchImmunity, settings.centralLat, settings.centralLng, settings.targetRadius, Date.now(), "lobby"],
+        "INSERT INTO rooms (room_id, room_name, host_player_id, game_duration, catch_immunity, central_lat, central_lng, target_radius, start_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [roomId, roomName, hostPlayerId, gameDuration, catchImmunity, settings.centralLat, settings.centralLng, targetRadius, Date.now(), "lobby"],
         function (err) {
           if (err) reject(err);
           resolve(this.lastID);
@@ -570,9 +1014,10 @@ module.exports = function (io, db) {
     return Math.min(max, Math.max(min, Math.round(number)));
   }
 
+  // The same name typed with different capitals is the same player
   async function getPlayer(roomId, username) {
     return new Promise((resolve, reject) => {
-      db.get("SELECT * FROM players WHERE room_id = ? AND username = ?", [roomId, username], (err, row) => {
+      db.get("SELECT * FROM players WHERE room_id = ? AND username = ? COLLATE NOCASE ORDER BY rowid LIMIT 1", [roomId, username], (err, row) => {
         if (err) reject(err);
         resolve(row);
       });
@@ -793,31 +1238,42 @@ module.exports = function (io, db) {
   async function processZoneSchedules() {
     const rooms = await getActiveRooms();
 
-    for (const room of rooms) {
-      const schedule = roomSchedule(room);
+    for (const { room_id } of rooms) {
+      await withRoomLock(room_id, () => processRoomSchedule(room_id));
+    }
+  }
 
-      if (!schedule.gameStartTime) {
+  async function processRoomSchedule(roomId) {
+    // Read fresh under the lock: the game may have just ended
+    const room = await getRoomById(roomId);
+
+    if (!room || room.status !== "active") {
+      return;
+    }
+
+    const schedule = roomSchedule(room);
+
+    if (!schedule.gameStartTime) {
+      return;
+    }
+
+    const runners = await getTeamPlayers(room.room_id, "runner");
+    let changed = false;
+
+    for (const runner of runners) {
+      if (runner.status === "won" || runner.status === "caught") {
         continue;
       }
 
-      const runners = await getTeamPlayers(room.room_id, "runner");
-      let changed = false;
+      const advanced = await advanceRunnerZones(room, schedule, runner);
+      changed = changed || advanced;
+    }
 
-      for (const runner of runners) {
-        if (runner.status === "won" || runner.status === "caught") {
-          continue;
-        }
-
-        const advanced = await advanceRunnerZones(room, schedule, runner);
-        changed = changed || advanced;
-      }
-
-      if (Date.now() >= schedule.gameEndTime) {
-        await endGameOnTime(room);
-      } else if (changed) {
-        await broadcastGameState(room.room_id);
-        await checkForGameOver(room.room_id);
-      }
+    if (Date.now() >= schedule.gameEndTime) {
+      await endGameOnTime(room);
+    } else if (changed) {
+      await broadcastGameState(room.room_id);
+      await checkForGameOver(room.room_id);
     }
   }
 
@@ -951,6 +1407,13 @@ module.exports = function (io, db) {
 
   // The game is over once every runner is out or has won
   async function checkForGameOver(roomId) {
+    const room = await getRoomById(roomId);
+
+    // Only a game still being played can end, and only once
+    if (!room || room.status !== "active") {
+      return false;
+    }
+
     const runners = await getTeamPlayers(roomId, "runner");
     const stillRunning = runners.filter((runner) => runner.status !== "won" && runner.status !== "caught");
 
@@ -970,15 +1433,15 @@ module.exports = function (io, db) {
 
   // Each player gets their own view of the state, since a runner's zones are
   // theirs alone and hunters are shown none at all
-  async function broadcastGameState(roomId) {
-    await broadcastToPlayers(roomId, "game_state", (gameState) => gameState);
+  async function broadcastGameState(roomId, exceptSocketId = null) {
+    await broadcastToPlayers(roomId, "game_state", (gameState) => gameState, exceptSocketId);
   }
 
-  async function broadcastToPlayers(roomId, event, payloadFor) {
+  async function broadcastToPlayers(roomId, event, payloadFor, exceptSocketId = null) {
     const states = new Map();
 
-    for (const [socketId, info] of connectedPlayers.entries()) {
-      if (info.roomId !== roomId) {
+    for (const [socketId, info] of [...connectedPlayers.entries()]) {
+      if (info.roomId !== roomId || socketId === exceptSocketId) {
         continue;
       }
 
@@ -1027,7 +1490,15 @@ module.exports = function (io, db) {
     }
 
     if (player.status === "caught") {
-      return player.elimination_reason === "missed_zone" ? "missed_zone" : "caught";
+      if (player.elimination_reason === "missed_zone" || player.elimination_reason === "left") {
+        return player.elimination_reason;
+      }
+
+      return "caught";
+    }
+
+    if (player.left_at) {
+      return "left";
     }
 
     if (player.team !== "runner") {
@@ -1249,6 +1720,13 @@ module.exports = function (io, db) {
         shieldLostReason: player.shield_lost_reason || null,
         immunityUntil: player.immunity_until || null,
         eliminationReason: player.elimination_reason || null,
+        isHost: player.player_id === room.host_player_id,
+
+        // Whether their app is open right now. Closing it is not leaving.
+        connected: isPlayerConnected(player.player_id),
+
+        // Left the game part way through, so no longer in the player lists
+        leftAt: player.left_at || null,
         location: {
           lat: player.last_lat,
           lng: player.last_lng,
@@ -1263,6 +1741,7 @@ module.exports = function (io, db) {
       const gameState = {
         roomId: room.room_id,
         roomName: room.room_name,
+        hostPlayerId: room.host_player_id || null,
         targetRadius: room.target_radius,
         gameDuration: schedule.gameDuration,
         catchImmunity: schedule.catchImmunity,

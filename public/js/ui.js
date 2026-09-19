@@ -32,6 +32,13 @@ const UI = {
       screen.classList.add("active");
       window.currentScreen = screenId;
 
+      // Every screen opens at its top. #app can't be scrolled by the user, but
+      // a phone bringing a focused text box into view can still nudge it, and
+      // would leave the next screen's header cut off with no way back.
+      const app = document.getElementById("app");
+      if (app) app.scrollTop = 0;
+      screen.scrollTop = 0;
+
       // Fire screen-specific init
       switch (screenId) {
         case "create-room-screen":
@@ -150,19 +157,44 @@ const UI = {
     }, 5000);
   },
 
-  // Show loading overlay
-  showLoading: function (message = "Loading...") {
+  // Show loading overlay. It covers the whole screen, so it never stays up
+  // forever waiting on an answer that got lost.
+  showLoading: function (message = "Loading...", timeoutMs = 20000) {
     const loadingOverlay = document.getElementById("loading-overlay");
     const loadingMessage = document.getElementById("loading-message");
 
     loadingMessage.textContent = message;
     loadingOverlay.classList.add("show");
+
+    clearTimeout(this.loadingTimer);
+    this.loadingTimer = setTimeout(() => {
+      if (loadingOverlay.classList.contains("show")) {
+        this.hideLoading();
+        this.showNotification("The server is taking a while to answer. Check your connection and try again.", "warning");
+      }
+    }, timeoutMs);
   },
 
   // Hide loading overlay
   hideLoading: function () {
     const loadingOverlay = document.getElementById("loading-overlay");
     loadingOverlay.classList.remove("show");
+    clearTimeout(this.loadingTimer);
+  },
+
+  // A strip across the top while the connection is down. The game carries on
+  // underneath: nothing is lost, and we rejoin as soon as it is back.
+  setConnectionStatus: function (status) {
+    const banner = document.getElementById("connection-banner");
+    if (!banner) return;
+
+    if (status === "connected") {
+      banner.classList.remove("show");
+      return;
+    }
+
+    banner.textContent = status === "offline" ? "Can't reach the server - retrying..." : "Connection lost - reconnecting...";
+    banner.classList.add("show");
   },
 
   // Update player lists in game menu
@@ -178,19 +210,24 @@ const UI = {
     hunterList.innerHTML = "";
     runnerList.innerHTML = "";
 
-    // Filter and sort players by team
-    const hunters = players.filter((p) => p.team === "hunter");
-    const runners = players.filter((p) => p.team === "runner");
+    // Filter and sort players by team. Anyone who left the game is gone from
+    // the lists; the results at the end still show how they finished.
+    const present = players.filter((p) => !p.leftAt);
+    const hunters = present.filter((p) => p.team === "hunter");
+    const runners = present.filter((p) => p.team === "runner");
 
     // Add hunters to list. Runners who went out are hunters now, so say how.
     hunters.forEach((hunter) => {
       const listItem = document.createElement("li");
       listItem.className = "player-item team-hunter";
       listItem.setAttribute("data-player-id", hunter.playerId);
-      listItem.innerHTML = `
-                <span class="player-name">${hunter.username}</span>
-                ${hunter.status === "caught" ? `<span class="player-status caught">${hunter.eliminationReason === "missed_zone" ? "Missed zone" : "Caught"}</span>` : ""}
-            `;
+
+      listItem.appendChild(this.textSpan("player-name", hunter.username));
+
+      if (hunter.status === "caught") {
+        listItem.appendChild(this.textSpan("player-status caught", hunter.eliminationReason === "missed_zone" ? "Missed zone" : "Caught"));
+      }
+
       hunterList.appendChild(listItem);
     });
 
@@ -199,10 +236,22 @@ const UI = {
       const listItem = document.createElement("li");
       listItem.className = "player-item team-runner";
       listItem.setAttribute("data-player-id", runner.playerId);
-      listItem.innerHTML = `
-                <span class="player-name"><span class="player-color" style="--runner-color: ${GameMap.runnerColor(runner.colorIndex)}"></span>${runner.username}</span>
-                ${runner.status === "won" ? '<span class="player-status won">Won</span>' : this.shieldBadge(runner)}
-            `;
+
+      const name = this.textSpan("player-name", runner.username);
+      const swatch = document.createElement("span");
+      swatch.className = "player-color";
+      swatch.style.setProperty("--runner-color", GameMap.runnerColor(runner.colorIndex));
+      name.prepend(swatch);
+
+      listItem.appendChild(name);
+
+      if (runner.status === "won") {
+        listItem.appendChild(this.textSpan("player-status won", "Won"));
+      } else {
+        const badge = this.shieldBadgeContent(runner);
+        listItem.appendChild(this.textSpan(`player-shield ${badge.state}`, badge.text));
+      }
+
       runnerList.appendChild(listItem);
     });
 
@@ -210,6 +259,14 @@ const UI = {
     if (typeof PlayerListIndicator !== "undefined" && PlayerListIndicator.refreshIndicators) {
       PlayerListIndicator.refreshIndicators();
     }
+  },
+
+  // Player names are only ever put on the page as text
+  textSpan: function (className, text) {
+    const span = document.createElement("span");
+    span.className = className;
+    span.textContent = text;
+    return span;
   },
 
   // How a player's game ended, in words, shared by the scoreboard and the
@@ -224,6 +281,8 @@ const UI = {
         return { text: "Missed a zone", state: "out" };
       case "out_of_time":
         return { text: "Ran out of time", state: "timeout" };
+      case "left":
+        return { text: "Left the game", state: "left" };
       case "hunter":
         return { text: "Hunter", state: "hunter" };
       default:
@@ -245,12 +304,6 @@ const UI = {
     }
 
     return { state: "spent", text: "⚠ Last life" };
-  },
-
-  shieldBadge: function (runner) {
-    const badge = this.shieldBadgeContent(runner);
-
-    return `<span class="player-shield ${badge.state}">${badge.text}</span>`;
   },
 
   // Keep immunity countdowns in the menu ticking without rebuilding the lists
