@@ -45,6 +45,12 @@ function hasSession() {
   return Boolean(gameState.roomId && gameState.playerId);
 }
 
+// A game being played is shown on two screens: the status screen, which tells
+// you everything but where anything is, and the map, which pings your location
+function inGameScreen(screen = window.currentScreen) {
+  return screen === "status-screen" || screen === "game-screen";
+}
+
 function setupAllEventListeners() {
   // Splash screen buttons
   document.getElementById("create-room-btn").addEventListener("click", () => {
@@ -109,11 +115,23 @@ function setupAllEventListeners() {
     });
   });
 
-  // Game controls
-  document.getElementById("menu-btn").addEventListener("click", () => {
-    document.getElementById("game-menu").classList.add("open");
-    // Update voice chat settings display when menu opens
-    updateVoiceChatSettingsDisplay();
+  // Game controls. The menu opens from the status screen and the map alike.
+  ["menu-btn", "status-menu-btn"].forEach((id) => {
+    document.getElementById(id).addEventListener("click", () => {
+      document.getElementById("game-menu").classList.add("open");
+      // Update voice chat settings display when menu opens
+      updateVoiceChatSettingsDisplay();
+    });
+  });
+
+  // The map is the only screen that shares where you are, so it is opened by
+  // hand rather than being where a game drops you
+  document.getElementById("open-map-btn").addEventListener("click", () => {
+    Game.openMap();
+  });
+
+  document.getElementById("close-map-btn").addEventListener("click", () => {
+    Game.closeMap();
   });
 
   document.getElementById("close-menu-btn").addEventListener("click", () => {
@@ -163,7 +181,9 @@ function setupAllEventListeners() {
     UI.updateShieldZonesHint();
   });
 
-  document.getElementById("caught-btn").addEventListener("click", reportSelfCaught);
+  ["caught-btn", "status-caught-btn"].forEach((id) => {
+    document.getElementById(id).addEventListener("click", reportSelfCaught);
+  });
 
   document.getElementById("leave-game-btn").addEventListener("click", leaveGame);
 
@@ -464,7 +484,7 @@ function showRoom(state) {
   const screen = window.currentScreen;
 
   if (state.status === "active") {
-    if (screen === "game-screen" && Game.isRunning(state.roomId)) {
+    if (inGameScreen(screen) && Game.isRunning(state.roomId)) {
       Game.updateGameState(state);
     } else {
       startGameUI(state, { resumed: true });
@@ -672,7 +692,7 @@ function handleGameState(state) {
 
   if (screen === "lobby-screen") {
     updateLobbyUI(state);
-  } else if (screen === "game-screen") {
+  } else if (inGameScreen(screen)) {
     if (!Game.isRunning(state.roomId)) {
       // Game not initialized yet, do full initialization
       Game.init(gameState, socket, state);
@@ -696,7 +716,7 @@ function handlePlayerJoined(data) {
 function handlePlayerLeft(data) {
   console.log("Player left:", data);
 
-  const where = window.currentScreen === "game-screen" ? "the game" : "the lobby";
+  const where = inGameScreen() ? "the game" : "the lobby";
   UI.showNotification(data.removed ? `${data.username} was removed from the lobby` : `${data.username} left ${where}`, "info");
 
   if (data.newHostId && data.newHostId === gameState.playerId) {
@@ -726,7 +746,7 @@ function handleRemovedFromRoom(data) {
 }
 
 function handleRunnerLocation(data) {
-  if (window.currentScreen === "game-screen") {
+  if (Game.mapOpen) {
     // Update player marker on map
     GameMap.updateOtherPlayerLocation(data);
   }
@@ -991,7 +1011,7 @@ function handleGameStarted(data) {
   }
 
   // Already playing it (a second tap on Start was answered with the game)
-  if (window.currentScreen === "game-screen" && Game.isRunning(data.gameState.roomId)) {
+  if (inGameScreen() && Game.isRunning(data.gameState.roomId)) {
     return Game.updateGameState(data.gameState);
   }
 
@@ -1003,7 +1023,10 @@ function handleGameStarted(data) {
 function startGameUI(state, { resumed = false } = {}) {
   console.log("Starting game UI with state:", state);
   UI.hideLoading();
-  UI.showScreen("game-screen");
+
+  // Every game opens on the status screen. Opening the map is a choice, since
+  // it is what pings your location.
+  UI.showScreen("status-screen");
   gameState.gameStatus = state.status;
   saveGameSession();
 
@@ -1194,7 +1217,7 @@ window.Game.getGameState = function () {
 
 // Function to return to an active game from the lobby
 function returnToActiveGame() {
-  UI.showScreen("game-screen");
+  UI.showScreen("status-screen");
   // Request the latest game state
   socket.emit("resync_game_state", { roomId: gameState.roomId });
 }

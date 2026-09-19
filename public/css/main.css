@@ -582,6 +582,87 @@ textarea:focus {
   gap: var(--spacing-3);
 }
 
+/* Status Screen: the game's information, with nothing about where anybody is */
+.status-cta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  background-color: var(--color-surface);
+  border: var(--border-width-thin) solid var(--color-border);
+  border-radius: var(--border-radius-lg);
+  padding: var(--spacing-4);
+  margin-bottom: var(--spacing-4);
+}
+
+.status-value {
+  font-family: var(--font-family-mono);
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-sm);
+  text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.status-value.status-hunter {
+  color: var(--color-hunter-light);
+}
+
+.status-value.status-runner {
+  color: var(--color-runner-light);
+}
+
+/* The zone colours read the same here as they do in the map's header */
+.status-value.zone-open {
+  color: #4caf50;
+}
+
+.status-value.zone-locked {
+  color: #ffeb3b;
+}
+
+.status-value.zone-closing {
+  color: #ef7d54;
+}
+
+.status-value.zone-captured {
+  color: #4caf50;
+}
+
+.status-value.player-shield {
+  margin-left: 0;
+  font-size: inherit;
+}
+
+/* One row per player: name, how far they have got, and their shield */
+.status-player {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: var(--spacing-2);
+  min-width: 0;
+}
+
+.status-player.away {
+  opacity: 0.55;
+}
+
+.status-player .player-shield.won {
+  color: #4caf50;
+}
+
+/* The line under each block, explaining what the numbers above it mean */
+.status-cta .lobby-note,
+#status-your-note {
+  margin-top: var(--spacing-2);
+  margin-bottom: 0;
+}
+
+.status-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-4);
+}
+
 /* Game Screen */
 .game-header {
   display: flex;
@@ -620,6 +701,11 @@ textarea:focus {
 
 .menu-btn:hover {
   background-color: rgba(255, 255, 255, 0.1);
+}
+
+.map-back-btn {
+  font-size: var(--font-size-xl);
+  margin-right: var(--spacing-1);
 }
 
 .game-map {

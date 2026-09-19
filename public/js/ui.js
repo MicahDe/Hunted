@@ -26,6 +26,11 @@ const UI = {
       screen.classList.remove("active");
     });
 
+    // The game menu is a fixed overlay shared by the status screen and the
+    // map, so it can't be left open over whatever comes next
+    const menu = document.getElementById("game-menu");
+    if (menu) menu.classList.remove("open");
+
     // Show the requested screen
     const screen = document.getElementById(screenId);
     if (screen) {
@@ -51,8 +56,12 @@ const UI = {
           // The lobby map will be initialized by updateLobbyUI in app.js
           // This separation ensures we have the correct data when showing the map
           break;
+        case "status-screen":
+          // Kept up to date by Game.refreshStatus, on the game clock
+          break;
         case "game-screen":
-          // Game screen is initialized by Game.init()
+          // The map is built by Game.openMap(), which is also what starts
+          // sharing where this player is
           break;
         case "game-over-screen":
           // Any game-over-specific initialization
@@ -421,3 +430,8 @@ const UI = {
     }
   },
 };
+
+// Export for use in other modules
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = UI;
+}

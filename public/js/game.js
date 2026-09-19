@@ -23,8 +23,14 @@ const Game = {
     statusTimer: null,
   },
 
-  // Whether a game is being played on this screen: GPS on, pings going out
+  // Whether a game is being played on this screen: countdowns running, state
+  // arriving. GPS and pings wait on the map being opened.
   running: false,
+
+  // Whether the map is open. It is the only screen that pings your location,
+  // captures zones, or plays voice chat: the status screen tells nobody
+  // anything about where you are.
+  mapOpen: false,
 
   // Whether we were invisible at the last status tick, to catch the moment we
   // stop being
@@ -49,40 +55,100 @@ const Game = {
       team: gameState.team,
     };
 
-    // Set up map
-    GameMap.initGameMap(initialState.centralLocation.lat, initialState.centralLocation.lng, initialState.targetRadius);
-
     // Initialize UI
     this.initGameUI();
 
-    // Initialize voice chat system
+    // Voice chat is set up now but stays silent until the map is opened
     this.initVoiceChat();
+    this.setVoiceListening(false);
 
-    // Start location timer
-    this.startLocationTimer();
-
-    if (initialState.players) {
-      initialState.players.forEach((player) => {
-        if (player.playerId !== this.playerInfo.playerId) {
-          GameMap.updateOtherPlayerLocation(player);
-        }
-      })
-    }
-
-    // Draw runner trails if available in the game state
-    if (initialState.runnerTrails) {
-      Object.values(initialState.runnerTrails).forEach((runnerData) => {
-        GameMap.updateOtherPlayerLocation(runnerData);
-      });
-    }
-
-    // Update targets on map
-    console.log("Updating targets on map for team:", gameState.team);
-    GameMap.updateTargets(initialState.targets, gameState.team);
+    // Shields are public, so the map labels can show who still has one
     GameMap.setShieldStates(initialState.players);
 
     // Keep the game clock, zone window and shield counting down
     this.startStatusTicker();
+  },
+
+  // Open the map: the one thing in the game that shares where you are. It
+  // draws itself fresh from the game state each time, so nothing is left over
+  // from the last time it was open.
+  openMap: function () {
+    if (!this.running || !this.gameState) return;
+
+    UI.showScreen("game-screen");
+    this.mapOpen = true;
+
+    this.renderMap();
+
+    // Pings keep going while the map is open, even if the phone's GPS is quiet
+    this.startLocationTimer();
+
+    // Voice chat is only heard here
+    this.setVoiceListening(true);
+
+    // Live pings that arrived while the map was shut were not drawn, so ask
+    // for the state again rather than showing a map that is behind
+    if (this.socket && window.isInRoom && window.isInRoom()) {
+      this.socket.emit("resync_game_state", { roomId: this.gameState.roomId });
+    }
+  },
+
+  // Back to the status screen: GPS off, no more pings, and voice chat silent
+  closeMap: function () {
+    this.mapOpen = false;
+
+    GameMap.stopLocationTracking();
+    GameMap.destroyGameMap();
+
+    if (this.timers.locationTimer) {
+      clearInterval(this.timers.locationTimer);
+      this.timers.locationTimer = null;
+    }
+
+    this.setVoiceListening(false);
+
+    UI.showScreen("status-screen");
+    this.refreshStatus();
+  },
+
+  // Draw the map from the game state: everyone last seen, their trails, and
+  // the zone the runner is on
+  renderMap: function () {
+    const state = this.gameState;
+    if (!state || !state.centralLocation) return;
+
+    GameMap.initGameMap(state.centralLocation.lat, state.centralLocation.lng, state.targetRadius);
+
+    if (state.players) {
+      state.players.forEach((player) => {
+        if (player.playerId !== this.playerInfo.playerId) {
+          GameMap.updateOtherPlayerLocation(player);
+        }
+      });
+    }
+
+    // Draw runner trails if available in the game state
+    if (state.runnerTrails) {
+      Object.values(state.runnerTrails).forEach((runnerData) => {
+        GameMap.updateOtherPlayerLocation(runnerData);
+      });
+    }
+
+    console.log("Updating targets on map for team:", this.playerInfo.team);
+    GameMap.updateTargets(state.targets, this.playerInfo.team);
+    GameMap.setShieldStates(state.players);
+
+    // Runners who are out lose their runner marker
+    if (state.players) {
+      state.players.filter((player) => player.status === "caught").forEach((player) => GameMap.removeRunnerMarker(player.playerId));
+    }
+  },
+
+  // Voice chat belongs to the map screen: on the status screen nobody is heard
+  setVoiceListening: function (listening) {
+    if (typeof VoiceChat === "undefined" || !VoiceChat.setListening) return;
+
+    VoiceChat.setListening(listening);
   },
 
   // Initialize game UI
@@ -191,6 +257,10 @@ const Game = {
     // Only send if we're in an active game
     if (!this.running || !this.socket || !this.gameState) return;
 
+    // Opening the map is what shares where you are, so a fix that lands after
+    // it was closed again goes nowhere
+    if (!this.mapOpen) return;
+
     // Nothing is sent while the connection is down or we are still rejoining:
     // it would only be queued up and arrive before the server knew who we
     // were. We send our position again as soon as we are back in.
@@ -227,7 +297,9 @@ const Game = {
       UI.updateGamePlayerLists(state.players);
     }
 
-    // Update targets on map (always call this to ensure targets are properly updated)
+    // Update targets on map (always call this to ensure targets are properly
+    // updated). With the map shut there is nothing to draw on - it is built
+    // again from the state when it is opened.
     if (this.playerInfo) {
       GameMap.updateTargets(state.targets, this.playerInfo.team);
     }
@@ -288,6 +360,12 @@ const Game = {
     this.updateGameClock(now);
     this.updateZoneStatusDisplay(now, isRunner);
     this.updateShieldDisplay(now, isRunner);
+
+    // The status screen runs off the same clock, so its countdowns stay in
+    // step with the map's header
+    if (window.currentScreen === "status-screen" && typeof StatusScreen !== "undefined") {
+      StatusScreen.update(this.gameState, this.playerInfo);
+    }
 
     // The menu's immunity and invisibility countdowns only matter while
     // someone is looking
@@ -386,10 +464,12 @@ const Game = {
 
     const player = this.getMyPlayer();
 
-    // Nothing to show once you are out of the game or have won it
+    // Nothing to show once you are out of the game or have won it. Hunters
+    // have no shield of their own and nothing to report, and the status
+    // screen's button has no team controls hiding it for them.
     if (!isRunner || !player || player.status === "caught" || player.status === "won") {
       container.style.display = "none";
-      this.updateCaughtButton(null, player && player.status === "won");
+      this.updateCaughtButton(null, true);
       this.wasInvisible = false;
       return;
     }
@@ -432,20 +512,25 @@ const Game = {
 
   // Reporting yourself caught is pointless while you are immune, and the server
   // turns it down anyway. A runner who has made it home can't be caught at all.
+  //
+  // The button sits on the map and on the status screen, so being caught never
+  // costs a runner a ping: reporting it takes no location at all.
   updateCaughtButton: function (shield, hidden = false) {
-    const button = document.getElementById("caught-btn");
-    if (!button) return;
+    ["caught-btn", "status-caught-btn"].forEach((id) => {
+      const button = document.getElementById(id);
+      if (!button) return;
 
-    button.style.display = hidden ? "none" : "";
+      button.style.display = hidden ? "none" : "";
 
-    if (shield && shield.immune) {
-      button.disabled = true;
-      button.textContent = `Immune ${zoneUtils.formatCountdown(shield.immuneMsRemaining)}`;
-      return;
-    }
+      if (shield && shield.immune) {
+        button.disabled = true;
+        button.textContent = `Immune ${zoneUtils.formatCountdown(shield.immuneMsRemaining)}`;
+        return;
+      }
 
-    button.disabled = false;
-    button.textContent = "I've Been Caught";
+      button.disabled = false;
+      button.textContent = "I've Been Caught";
+    });
   },
 
   // Update team UI
@@ -490,12 +575,14 @@ const Game = {
     }
 
     GameMap.stopLocationTracking();
+    GameMap.destroyGameMap();
 
     if (this.running) {
       this.cleanupVoiceChat();
     }
 
     this.running = false;
+    this.mapOpen = false;
     this.wasInvisible = false;
   },
 

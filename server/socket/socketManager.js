@@ -1181,6 +1181,33 @@ module.exports = function (io, db) {
     return trailUtils.buildTrail(rows, now, config.game.trail, hidden);
   }
 
+  // How far each player has got, in zone numbers alone - never where their
+  // zones are. A runner's zone only moves on when they capture the one before,
+  // so the zone they are on says how many they have captured. Safe for
+  // everybody to see: it says who is ahead, not where anyone is.
+  async function getRoomZoneProgress(roomId, schedule) {
+    const rows = await new Promise((resolve, reject) => {
+      db.all("SELECT player_id, zone_index, status FROM targets WHERE room_id = ? ORDER BY rowid", [roomId], (err, result) => {
+        if (err) reject(err);
+        resolve(result || []);
+      });
+    });
+
+    const progress = {};
+
+    rows.forEach((row) => {
+      const zoneIndex = row.zone_index || 0;
+      const reached = row.status === "reached";
+
+      progress[row.player_id] = {
+        zonesCaptured: reached ? schedule.zoneCount : zoneIndex,
+        currentZone: reached ? null : zoneIndex + 1,
+      };
+    });
+
+    return progress;
+  }
+
   // All players in a room, in the order they joined
   async function getRoomPlayers(roomId) {
     return new Promise((resolve, reject) => {
@@ -1748,6 +1775,7 @@ module.exports = function (io, db) {
       const players = await getRoomPlayers(roomId);
       const runnerColorIndexes = getRunnerColorIndexes(players);
       const schedule = roomSchedule(room);
+      const zoneProgress = await getRoomZoneProgress(roomId, schedule);
 
       // Get trails for all runners
       const runnerTrails = {};
@@ -1796,6 +1824,12 @@ module.exports = function (io, db) {
         invisibleUntil: player.shield_lost_reason === "expired" ? invisibilityOf(player, schedule)?.end || null : null,
         eliminationReason: player.elimination_reason || null,
         isHost: player.player_id === room.host_player_id,
+
+        // How far they have got: which zone they are on, and how many they
+        // have captured. Numbers only - where those zones are stays private
+        // to the runner they belong to.
+        currentZone: zoneProgress[player.player_id]?.currentZone ?? null,
+        zonesCaptured: zoneProgress[player.player_id]?.zonesCaptured ?? null,
 
         // Whether their app is open right now. Closing it is not leaving.
         connected: isPlayerConnected(player.player_id),

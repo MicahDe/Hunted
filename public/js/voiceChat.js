@@ -13,6 +13,11 @@ const VoiceChat = {
   isEnabled: true,
   volume: 1.0,
 
+  // Voice chat belongs to the map screen. Everywhere else - the status screen
+  // a player lands on - nobody is heard and the microphone cannot be opened,
+  // so reading the game never puts you in the room's conversation.
+  isListening: false,
+
   // Lifecycle
   isInitialized: false,
 
@@ -324,6 +329,11 @@ const VoiceChat = {
       return;
     }
 
+    if (!this.isListening) {
+      console.warn('Voice chat is only live on the map screen');
+      return;
+    }
+
     if (!this.isInitialized) {
       console.error('Voice chat not initialized');
       return;
@@ -631,7 +641,7 @@ const VoiceChat = {
       return;
     }
 
-    if (!this.isEnabled || !this.isInitialized || !this.audioPlayback) {
+    if (!this.isEnabled || !this.isListening || !this.isInitialized || !this.audioPlayback) {
       return;
     }
 
@@ -649,7 +659,7 @@ const VoiceChat = {
    */
   handleIncomingAudio(data) {
     try {
-      if (!this.isEnabled) {
+      if (!this.isEnabled || !this.isListening) {
         return;
       }
 
@@ -762,9 +772,7 @@ const VoiceChat = {
         }
       }
 
-      if (typeof MicButton !== 'undefined' && MicButton.setAvailable) {
-        MicButton.setAvailable(this.isEnabled);
-      }
+      this.updateMicAvailability();
 
       this.saveSettings();
     } catch (error) {
@@ -777,6 +785,45 @@ const VoiceChat = {
    */
   getEnabled() {
     return this.isEnabled;
+  },
+
+  /**
+   * Whether this screen hears voice chat at all. The map screen does; the
+   * status screen does not, so anything arriving while it is up is dropped
+   * rather than queued up to play later.
+   * @param {boolean} listening
+   */
+  setListening(listening) {
+    const next = Boolean(listening);
+
+    if (this.isListening === next) {
+      return;
+    }
+
+    this.isListening = next;
+    console.log(`Voice chat ${next ? 'listening' : 'silent'}`);
+
+    if (!next) {
+      this.stopTransmission();
+
+      // Drop whatever is queued: coming back to the map should not play a
+      // backlog of what was said while it was shut
+      if (this.audioPlayback) {
+        this.audioPlayback.stop();
+      }
+    }
+
+    this.updateMicAvailability();
+  },
+
+  /**
+   * The microphone can only be opened where voice chat is both switched on
+   * and being listened to
+   */
+  updateMicAvailability() {
+    if (typeof MicButton !== 'undefined' && MicButton.setAvailable) {
+      MicButton.setAvailable(this.isEnabled && this.isListening);
+    }
   },
 
   /**
@@ -1010,6 +1057,7 @@ const VoiceChat = {
       this.state = 'idle';
       this.transmissionGeneration++;
       this.isInitialized = false;
+      this.isListening = false;
       this.socket = null;
       this.gameState = null;
       this.localPlayerId = null;
