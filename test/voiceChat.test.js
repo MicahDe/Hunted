@@ -184,6 +184,12 @@ function setupVoiceChat(options = {}) {
 
   assert.strictEqual(ok, true, 'VoiceChat.init should succeed');
 
+  // Voice chat starts silent and is only live on the map screen, which is what
+  // opens it. Tests that care about the gate itself pass listening: false.
+  if (options.listening !== false) {
+    VoiceChat.setListening(true);
+  }
+
   return { VoiceChat, socket, capture, context, listeners };
 }
 
@@ -198,6 +204,58 @@ test('initialises with a shared AudioContext and the local player id', () => {
   assert.strictEqual(VoiceChat.localPlayerId, 'me');
   assert.strictEqual(VoiceChat.audioContext, context);
   assert.strictEqual(VoiceChat.audioPlayback.audioContext, context, 'playback should share the context');
+});
+
+test('nothing is heard or sent while voice chat is not being listened to', async () => {
+  const { VoiceChat, socket, capture } = setupVoiceChat({ listening: false });
+
+  assert.strictEqual(VoiceChat.isListening, false, 'voice chat should start silent');
+
+  // The status screen is up: the microphone cannot be opened from it
+  await VoiceChat.startTransmission();
+
+  assert.strictEqual(VoiceChat.state, 'idle');
+  assert.strictEqual(capture.startCalls, 0);
+  assert.strictEqual(socket.events('voice_transmission_start').length, 0);
+
+  // ...and nothing anybody else says is played
+  VoiceChat.handleTransmissionStarted({ playerId: 'them', username: 'Them', team: 'runner' });
+  VoiceChat.handleIncomingAudio({
+    playerId: 'them',
+    username: 'Them',
+    team: 'runner',
+    audioData: makePcm(320).buffer,
+    sampleRate: WIRE_RATE,
+    sequenceNumber: 1
+  });
+
+  assert.strictEqual(VoiceChat.getActiveSpeakers().length, 0, 'nobody should be heard off the map');
+});
+
+test('leaving the map screen stops transmitting and drops what was queued', async () => {
+  const { VoiceChat, socket, capture } = setupVoiceChat();
+
+  await VoiceChat.startTransmission();
+  assert.strictEqual(VoiceChat.state, 'transmitting');
+
+  VoiceChat.handleIncomingAudio({
+    playerId: 'them',
+    username: 'Them',
+    team: 'runner',
+    audioData: makePcm(320).buffer,
+    sampleRate: WIRE_RATE,
+    sequenceNumber: 1
+  });
+
+  assert.strictEqual(VoiceChat.getActiveSpeakers().length, 1, 'they should be heard on the map');
+
+  VoiceChat.setListening(false);
+  await VoiceChat.pendingStop;
+
+  assert.strictEqual(VoiceChat.state, 'idle');
+  assert.strictEqual(capture.stopCalls, 1);
+  assert.strictEqual(socket.events('voice_transmission_end').length, 1);
+  assert.strictEqual(VoiceChat.getActiveSpeakers().length, 0, 'the backlog should be dropped, not saved up');
 });
 
 test('a normal press announces the start, streams frames, then announces the end', async () => {

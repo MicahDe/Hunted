@@ -321,6 +321,31 @@ const GameMap = {
     this.startLabelUpdateTimer();
   },
 
+  // Take the game map down when the map screen is closed. Everything it was
+  // showing is drawn again from the game state next time it is opened, so
+  // nothing is kept alive behind a screen nobody is looking at.
+  destroyGameMap: function () {
+    if (this.labelUpdateTimer) {
+      clearInterval(this.labelUpdateTimer);
+      this.labelUpdateTimer = null;
+    }
+
+    if (this.gameMap) {
+      this.gameMap.remove();
+      this.gameMap = null;
+    }
+
+    this.playerMarker = null;
+    this.playerLabel = null;
+    this.runnerMarkers = {};
+    this.runnerLabels = {};
+    this.runnerTrails = {};
+    this.targetCircles = {};
+    this.drawnZoneStatus = null;
+    this.boundaryCircle = null;
+    this.playerDataCache = {};
+  },
+
   // Draw the target area on the game map, once
   showTargetArea: function (centerLat, centerLng, targetAreaRadius) {
     if (!this.gameMap || this.boundaryCircle || centerLat == null || centerLng == null) return;

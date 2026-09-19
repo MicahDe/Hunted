@@ -71,7 +71,9 @@ const MicButton = {
         });
       }
 
-      this.isAvailable = VoiceChat.getEnabled ? VoiceChat.getEnabled() : true;
+      // Only live where voice chat is switched on and being listened to,
+      // which is the map screen
+      this.isAvailable = VoiceChat.getEnabled ? VoiceChat.getEnabled() && VoiceChat.isListening !== false : true;
       this.transmissionState = VoiceChat.state || 'idle';
     }
 

@@ -5,6 +5,7 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 ## Features
 
 - **Real-time location tracking** - Hunters can track Runners' locations in real-time
+- **A status screen that costs nothing to read** - the clocks, the shields and everyone's progress, with the map (and the location ping that comes with it) opened by choice
 - **Zone windows** - each zone is capturable only during its own slot of the game clock
 - **One hidden final zone** - every Runner races for the same spot, by their own set of zones, and no Hunter is told where it is
 - **Shields** - one life per Runner against the Hunters, for the first few zones - and invisibility for anyone who keeps theirs that long
@@ -42,6 +43,13 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 - A window that closes with the zone uncaptured puts the Runner out and onto the Hunters' team, shield or no shield
 - The game ends when the final zone's window closes
 
+**The Status Screen and the Map:**
+- The app opens on a **status screen**: the game clock, the zone window everyone is in, when shields run out, your own zone and shield, and how far every player has got (which zone they are on and how many they have captured). It never asks the phone where it is, so reading it tells nobody anything
+- Nothing on it says where a zone, a Runner or a Hunter is - zones are named by number alone
+- **Open the Map** is what shares your location, and it keeps sharing it while the map is open. It is also the only way to capture a zone, so a Runner picks their moments. Going back to the status screen stops the ping, the GPS watch and the walkie-talkie
+- The walkie-talkie is only live on the map: on the status screen nobody is heard and the microphone cannot be opened
+- **I've Been Caught** sits on both screens, so reporting a catch never costs a Runner a ping (and so can't capture a zone by accident)
+
 **Sizing it up:** with the server running, `/zone-preview.html` draws a target area and a few Runners' zone chains on the map, using the game's own zone code. Handy for picking a target area radius before a game.
 
 **Shields:**
@@ -55,14 +63,15 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 
 **For Runners:**
 - Navigate through a series of nested zones that progressively reveal the final zone everyone is racing for
-- The header shows the zone you are on, the countdown to its window opening or closing, your shield, and how long is left in the game
-- While your app is open your location is shared live with everyone in the game (on every GPS update, and at least every 30 seconds); while it is closed, or you are invisible, nothing is shared
+- The status screen and the map's header both show the zone you are on, the countdown to its window opening or closing, your shield, and how long is left in the game
+- While the map is open your location is shared live with everyone in the game (on every GPS update, and at least every 30 seconds); while it is shut, the app is closed, or you are invisible, nothing is shared
+- Laying low means staying on the status screen: it has the clock, everyone's shields and how far each Runner has got, and costs nothing to read
 - You can see where other Runners and Hunters have pinged on the map
 - **Strategy:** Capture a zone early in its window and you get the next zone revealed while you still have time to walk to it
 - **Warning:** Laying low is how you miss a window - keep an eye on the countdown
 
 **For Hunters:**
-- Keep your app open at all times to share your location and coordinate with your team
+- Keep the map open at all times to share your location and coordinate with your team - the status screen shares nothing
 - Track Runner locations in real-time as they ping
 - Follow each Runner's trail from the last hour, including which way they were last heading
 - Catch Runners by taking their photo (share proof in your group chat!)
@@ -74,7 +83,7 @@ HUNTED is a real-time, location-based mobile web game where players are divided 
 
 - The host creates the room (joining as a Hunter) and is the only one who can start the game, which needs at least one Runner. The host can also remove players from the lobby
 - Room names and player names ignore capitals. A name belongs to one player: a name already in use by someone with the app open is refused, and one whose app is closed can be taken back from another phone
-- **Closing the app, losing signal or a phone sleeping never takes anyone out.** The app reconnects by itself and picks up where it left off, and the lobby shows who is away. The game clock carries on regardless, so zone windows still close
+- **Closing the app, losing signal or a phone sleeping never takes anyone out.** The app reconnects by itself and picks up where it left off, and the lobby shows who is away. The game clock carries on regardless, so zone windows still close. Reopening the app lands on the status screen, not the map
 - **Leave Lobby** removes a player from the room. A host who leaves hands the room to whoever has been in it longest (preferring someone whose app is open); the last player out closes the room and frees its name
 - **Leave Game** mid-game is final: a Runner who leaves is out ("Left the game"), which counts towards the game ending. They can rejoin by name, as a Hunter
 - Players can join a game already under way. A Runner who does starts on whichever zone the clock is on, with a shield if shields haven't run out yet. Nobody new can join once the game is over

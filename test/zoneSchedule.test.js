@@ -861,3 +861,59 @@ test("the host's shield settings are kept with the room, and kept sensible", asy
   assert.strictEqual(extremeRoom.shield_zones, ZONE_COUNT, "no more zones than the game has");
   assert.strictEqual(extremeRoom.invisibility, 0);
 });
+
+test("how far every runner has got is public, but never where their zones are", async () => {
+  const game = await createGame({ runners: ["Ruby", "Sam"] });
+
+  // Four minutes in, zone 1's lock is up and Ruby captures it
+  await game.setElapsed(4);
+  await game.pingInsideZone("Ruby");
+
+  game.players.Hank.socket.fire("resync_game_state", { roomId: game.roomId });
+  await settle();
+
+  const state = game.players.Hank.socket.lastState();
+  const of = (username) => state.players.find((player) => player.username === username);
+
+  assert.strictEqual(of("Ruby").zonesCaptured, 1, "Ruby captured zone 1");
+  assert.strictEqual(of("Ruby").currentZone, 2, "which puts her on zone 2");
+  assert.strictEqual(of("Sam").zonesCaptured, 0, "Sam is still on his first");
+  assert.strictEqual(of("Sam").currentZone, 1);
+
+  // Hunters have zones of neither their own nor anybody else's
+  assert.strictEqual(of("Hank").zonesCaptured, null);
+  assert.strictEqual(of("Hank").currentZone, null);
+  assert.deepStrictEqual(state.targets, [], "a hunter is sent no zones at all");
+
+  // Nothing in a player row says where anyone's zones are
+  state.players.forEach((player) => {
+    assert.ok(!("zones" in player) && !("target" in player), `${player.username} should carry no zone of their own`);
+  });
+
+  // A runner is sent the same progress for everyone, and zones only for themselves
+  game.players.Sam.socket.fire("resync_game_state", { roomId: game.roomId });
+  await settle();
+
+  const samState = game.players.Sam.socket.lastState();
+  assert.strictEqual(samState.players.find((player) => player.username === "Ruby").zonesCaptured, 1);
+  assert.strictEqual(samState.targets.length, 1);
+  assert.strictEqual(samState.targets[0].playerId, game.players.Sam.playerId, "only his own zone");
+});
+
+test("a runner who captured the final zone shows every zone captured", async () => {
+  const game = await createGame({ runners: ["Ruby"] });
+
+  // On the last zone, inside its window
+  await game.run("UPDATE targets SET zone_index = ?, radius_level = ? WHERE player_id = ?", [ZONE_COUNT - 1, config.game.targetRadiusLevels[ZONE_COUNT - 1], game.players.Ruby.playerId]);
+  await game.setElapsed(55);
+  await game.pingInsideZone("Ruby");
+
+  game.players.Hank.socket.fire("resync_game_state", { roomId: game.roomId });
+  await settle();
+
+  const ruby = game.players.Hank.socket.lastState().players.find((player) => player.username === "Ruby");
+
+  assert.strictEqual(ruby.status, "won");
+  assert.strictEqual(ruby.zonesCaptured, ZONE_COUNT);
+  assert.strictEqual(ruby.currentZone, null, "there is no next zone to be on");
+});
